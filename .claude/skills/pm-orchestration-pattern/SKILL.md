@@ -2,7 +2,7 @@
 name: pm-orchestration-pattern
 description: When the user/agent acts as PM-AI orchestrating parallel agents on the Spillorama bingo platform. Also use when they mention PM-orchestration, spawn agent, PR-first, done-policy, file:line, auto-pull, BACKLOG.md, gh pr merge --squash --auto, isolation worktree, Linear MCP, code-reviewer gate, "Agent N —", parallell agent-bølge, hot-reload, admin-restart-linje, dev:nuke, pm-push-control, cascade-rebase, auto-rebase-on-merge, scope-check, knowledge-protocol-checkbox, bug-resurrection, branch protection, CODEOWNERS, required reviews, access approval matrix, emergency merge. Defines the PM-centralized git flow, done-policy gates, auto-pull-after-merge protocol, access/approval checks, and parallel-agent spawn patterns. Make sure to use this skill whenever someone takes on a PM role for this project even if they don't explicitly ask for it — the cost of getting orchestration wrong is lost work, broken main, false-Done in regulator-facing docs, or unsafe merge controls.
 metadata:
-  version: 1.5.1
+  version: 1.6.0
   project: spillorama
 ---
 
@@ -439,6 +439,8 @@ PM oppdaterer BACKLOG.md når større initiativer endrer status (start/ferdig/bl
 - `docs/evidence/README.md` — persistent evidence-storage konvensjon `docs/evidence/<contract-id>/` (Fase 2 — ADR-0024)
 - `scripts/validate-delivery-report.mjs` — teknisk validering av Agent Delivery Report i PR-body, inkludert §5 cross-check mot diff (Fase 3 — ADR-0024)
 - `.github/workflows/delivery-report-gate.yml` — CI-gate som blokkerer high-risk PR-er uten gyldig delivery-report
+- `scripts/pm-knowledge-continuity.mjs` — Fase 3 P3-utvidet: per-spørsmål-heuristikk + generic-fluff-reject + `[self-test-bypass: ...]`-marker (55 tester)
+- `docs/engineering/PM_SELF_TEST_HEURISTICS.md` — per-spørsmål-anker-tabell + kalibrerings-guide for self-test-validator
 - `BACKLOG.md` — strategisk oversikt
 - `docs/operations/PM_HANDOFF_*.md` — PM-handoffs (én per session)
 - `.claude/active-agents.json` — registry over aktive agenter (commit-able)
@@ -477,3 +479,4 @@ PM oppdaterer BACKLOG.md når større initiativer endrer status (start/ferdig/bl
 | 2026-05-15 | v1.3.4 — la til fact-bound Agent Task Contract og `scripts/generate-agent-contract.sh` for å hindre agent-misforståelser i high-risk arbeid. |
 | 2026-05-16 | v1.5.0 — Fase 3 Punkt 1 etter ADR-0024: teknisk validering av Agent Delivery Report via ny `scripts/validate-delivery-report.mjs` + `delivery-report-gate.yml`. Validatoren krever alle 8 H3-headere, cross-checker §5 "Knowledge updates"-claims mot diff, og krever §4 "Tests"/§8 "Ready"-format. Bypass via `[delivery-report-not-applicable: <begrunnelse>]` + label. 32 tester. PITFALLS §11.22 ny fallgruve. |
 | 2026-05-16 | v1.5.1 — la til `scripts/dev/observability-snapshot.mjs` som standard før/etter live-test: Sentry, PostHog, pilot-monitor og read-only DB snapshots med `--compare`, slik at agent-evidence ikke baseres på muntlig observability-status. |
+| 2026-05-16 | v1.6.0 — Fase 3 Punkt 3 etter ADR-0024: per-spørsmål-heuristikk i `scripts/pm-knowledge-continuity.mjs` self-test-validator. Hver av de 12 spørsmålene har konkret anker-regex (PM_HANDOFF-filnavn, PR-numre, ADR-NNNN, §X.Y, skill-navn osv.). Generic-fluff-mønstre rejecteres. Bypass via `[self-test-bypass: <begrunnelse min 20 tegn>]`. 55 tester. Etablerer meta-pattern "paraphrase-validation med per-felt-anker" — nå brukt i 3 gates (Tier-3 fragility + delivery-report §5 + self-test). Fremtidig konsolidering til `scripts/lib/paraphrase-heuristics.mjs` spores som follow-up i ADR-0024. PITFALLS §11.23 ny fallgruve. Ny doc: `docs/engineering/PM_SELF_TEST_HEURISTICS.md`. |

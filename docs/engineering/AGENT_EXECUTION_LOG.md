@@ -4741,3 +4741,55 @@ Cart `[1 Stor hvit, 1 Stor gul, 1 Stor lilla]` ble committed som ÉN `app_game1_
 - Render "External Database URL" betyr ekstern nettverksruting, ikke read-only.
 - PM/agent-observability må bruke separat read-only secret. Full-access URL skal bare brukes ved eksplisitt write-oppdrag.
 - Snapshot-rapporter må vise DB-host/user uten passord, og secret-redaction må testes fordi database-URL-er lett kan matche email/token-regexer feil.
+
+### 2026-05-16 — PM-AI: Fase 3 P3 — self-test heuristikk (per-spørsmål-anker)
+
+**Agent-type:** PM/ops-hardening (Fase 3 P3 av ADR-0024)
+**Branch:** `claude/fase3-p3-self-test-heuristics-2026-05-16`
+**Scope:** Lukke Fase 3 P3-gapet fra konsulent-reviewen 2026-05-16 — `pm-knowledge-continuity.mjs --validate-self-test` valideret tidligere kun lengde + placeholder, ikke om svar refererte konkret pack-evidens. PM kunne skrive 80+ chars generic gibberish og passere.
+
+**Koordinering:**
+- Branch fra origin/main `9ff91e92c` etter PR #1554 (Codex GoH observability) + #1555 (coordination protocol) merget.
+- Lock-list-filer (PITFALLS_LOG, AGENT_EXECUTION_LOG, pm-orchestration-pattern SKILL.md) endret kun denne PR-en. Codex eier ikke disse akkurat nå.
+- Append-only på PITFALLS_LOG (§11.24) og denne entry.
+- Ingen workflow- eller package.json-endringer.
+
+**Evidence brukt før kode:**
+- Konsulent-review 2026-05-16 Fase 3 P3-research (parallell agent-spawn).
+- `scripts/pm-knowledge-continuity.mjs` linje 326-350 — eksisterende `validateSelfTest` (basic length + placeholder).
+- `scripts/verify-context-comprehension.mjs` — Tier-3 paraphrase-mønster (838 linjer, 48 tester, `COMPREHENSION_VERIFICATION.md`).
+- `SELF_TEST_QUESTIONS` (linje 27-40) — 12 norske spørsmål som dekker handoff, PR-state, P0-risk, ADR, skills, PITFALLS, observability, git-state, leveranser, kontrakt-format, knowledge-protocol.
+
+**Outputs:**
+- `scripts/pm-knowledge-continuity.mjs` utvidet med `PER_QUESTION_ANCHORS`-tabell (12 entries × 2-3 alternative regex-ankere), `isGenericSelfTestAnswer()`, `selfTestContentWords()` + `SELF_TEST_STOP_WORDS`, `hasQuestionAnchor()`, `extractSelfTestBypass()`, `validateSelfTestText()` (pure variant), og `isMain`-guard rundt CLI-invokasjon. Eksisterende `validateSelfTest()` returnerer nå `{ ok, errors, warnings, answers, bypass }`.
+- `scripts/__tests__/pm-knowledge-continuity.test.mjs` — NY, 55 tester (alle pass på ~177ms). Dekker PER_QUESTION_ANCHORS-coverage, parseAnswers, selfTestContentWords, isGenericSelfTestAnswer, hasQuestionAnchor (24 per-spørsmål-tester), extractSelfTestBypass, validateSelfTestText (10 full-flow), og heuristic guards.
+- `docs/engineering/PM_SELF_TEST_HEURISTICS.md` — NY, ~125 linjer. Per-spørsmål-anker-tabell, bypass-mekanisme, kalibrerings-guide, forhold til Tier-3 fragility-paraphrase-mønsteret.
+- `docs/operations/PM_KNOWLEDGE_CONTINUITY_V2.md` utvidet med Fase 3 P3-eksempler og bypass-konvensjon.
+- `.claude/skills/pm-orchestration-pattern/SKILL.md` v1.5.1 → v1.6.0.
+- `docs/engineering/PITFALLS_LOG.md` §11.24 (append-only) + endringslogg-row.
+
+**Tester kjørt:**
+- `node --test scripts/__tests__/pm-knowledge-continuity.test.mjs` — 55/55 pass.
+- `node --check scripts/pm-knowledge-continuity.mjs` — syntax OK.
+- CLI smoke test: `--help` viser usage, `--validate-self-test /tmp/x` (mangler fil) returnerer korrekt feilmelding.
+
+**Læring:**
+- Pure-variant-mønster (`validateSelfTestText(text, options)`) er kritisk for testbarhet — file-IO-versjonen (`validateSelfTest(file)`) er thin wrapper.
+- `isMain`-guard er obligatorisk i .mjs-scripts som både er CLI og module — uten den fyrer `process.exitCode = main()` ved import og forurenser test-runner.
+- Per-spørsmål-anker-mønsteret er det 3. stedet samme paraphrase-validation-pattern brukes (Tier-3, delivery-report-§5, self-test). Felles `paraphrase-heuristics.mjs`-modul kan ekstraheres i fremtidig konsolidering — spores i ADR-0024 konsolideringskriterier.
+- Bypass-marker (`[self-test-bypass: ...]`) speiler `[comprehension-bypass: ...]` og `[delivery-report-not-applicable: ...]`-konvensjonene — konsekvent navngivning øker oppdagbarhet.
+
+**Shared files touched (per coordination protocol):**
+- `docs/engineering/PITFALLS_LOG.md` (append-only: ny §11.24 + endringslogg-row)
+- `docs/engineering/AGENT_EXECUTION_LOG.md` (append-only: denne entry)
+- `.claude/skills/pm-orchestration-pattern/SKILL.md` (v1.5.1 → v1.6.0)
+- Ingen workflow- eller package.json-endringer.
+
+**Eierskap (filer endret):**
+- `scripts/pm-knowledge-continuity.mjs`
+- `scripts/__tests__/pm-knowledge-continuity.test.mjs`
+- `docs/engineering/PM_SELF_TEST_HEURISTICS.md`
+- `docs/operations/PM_KNOWLEDGE_CONTINUITY_V2.md`
+- `.claude/skills/pm-orchestration-pattern/SKILL.md`
+- `docs/engineering/PITFALLS_LOG.md`
+- `docs/engineering/AGENT_EXECUTION_LOG.md`

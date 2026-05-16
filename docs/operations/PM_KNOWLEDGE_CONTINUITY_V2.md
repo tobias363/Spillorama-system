@@ -62,6 +62,27 @@ Self-testen krever konkrete svar på minst disse områdene:
 
 Svar som bare sier "lest", "OK", "TODO", "kommer" eller annen placeholder-tekst avvises av scriptet.
 
+**Fase 3 P3 heuristikk (2026-05-16):** I tillegg til lengde- og placeholder-sjekk kjører scriptet nå per-spørsmål-anker-validering:
+
+- Q1 forventer `PM_HANDOFF_<dato>` eller `PM_SESSION_KNOWLEDGE_EXPORT_<dato>` filnavn.
+- Q2 forventer PR-nummer (`#NNNN`), workflow-navn eller branch-navn.
+- Q3 forventer `BIN-NNN`, P0/P1 + domene-keyword, eller `file.ts:line`.
+- Q4 forventer `ADR-NNNN` eller arkitektur-doc-navn.
+- Q5 forventer skill-navn fra `.claude/skills/`.
+- Q6 forventer `§X.Y`-format.
+- Q7 forventer Sentry/PostHog/pilot-monitor + konkret handling.
+- Q8 forventer branch-navn, fil-path eller "working tree clean".
+- Q9 forventer PR-nummer, commit-SHA eller spesifikk leveranse-referanse.
+- Q10 forventer fil-path, `BIN-NNN`, eller CLI-kommando.
+- Q11 forventer `AGENT_DELIVERY_REPORT`-referanse eller 8-seksjon-struktur.
+- Q12 forventer `SKILL.md` / `PITFALLS_LOG.md` / `AGENT_EXECUTION_LOG.md`-referanse.
+
+Generic-fluff-pattern ("OK", "lest gjennom", "tatt en titt", "have read") avvises ekstra etter placeholder-check.
+
+**Bypass for pack-spesifikke unntak:** Legg `[self-test-bypass: <begrunnelse min 20 tegn>]` i self-test-filen hvis pack genuint ikke inneholder en type referanse (eks. ingen åpne PR-er → Q2-anker ikke applicable). Bypass short-circuit-er hele valideringen. Bruk med disiplin.
+
+Full beskrivelse + 55 tester finnes i [`docs/engineering/PM_SELF_TEST_HEURISTICS.md`](../engineering/PM_SELF_TEST_HEURISTICS.md).
+
 ---
 
 ## PM-regel

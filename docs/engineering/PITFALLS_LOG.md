@@ -3963,6 +3963,31 @@ Lim hele kontrakten inn i agent-prompten.
 - `docs/evidence/README.md`
 - `.claude/skills/pm-orchestration-pattern/SKILL.md` v1.5.1
 
+### §11.24 — PM self-test fritekst-svar uten konkret pack-anker
+
+**Severity:** P2 (PM-onboarding-svekkelse, ikke akutt prod-risiko)
+**Oppdaget:** 2026-05-16 (Fase 3 P3 etter ADR-0024)
+**Symptom:** En PM kunne passere `pm-knowledge-continuity --validate-self-test` ved å skrive 80+ chars generisk gibberish som "Jeg har lest alt og forstår alle aspekter ved systemet, inkludert pilot og wallet og compliance og live-room". Validatoren sjekket bare lengde + placeholder-token, ikke om svaret refererte konkret pack-evidens.
+**Root cause:** `validateSelfTest()` hadde kun lengde-check (80 chars) + placeholder-token-regex. Ingen per-spørsmål-validering av at svaret refererer faktisk pack-innhold (handoff-filnavn, PR-numre, ADR-IDer, §X.Y-format, skill-navn, etc.).
+**Fix:**
+- Ny `PER_QUESTION_ANCHORS`-tabell i `scripts/pm-knowledge-continuity.mjs` med konkret regex-anker per spørsmål
+- Ny `isGenericSelfTestAnswer()` fluff-reject for "OK", "lest gjennom", "tatt en titt", "have read"
+- Ny `[self-test-bypass: <begrunnelse min 20 tegn>]`-marker for pack-spesifikke unntak
+- 55 tester i `scripts/__tests__/pm-knowledge-continuity.test.mjs`
+- Full dokumentasjon i `docs/engineering/PM_SELF_TEST_HEURISTICS.md`
+**Prevention:**
+- PM-svar skal være forankret i konkret pack-evidens (filnavn, PR-numre, ADR-IDer, §X.Y, skill-navn, file:line, etc.)
+- Bypass kun ved pack-spesifikke unntak (eks. ingen åpne PR-er → Q2-anker ikke applicable)
+- Per ADR-0024 konsolideringskriterier: hvis bypass brukes > 20% av sesjoner, kalibrer ankere
+**Related:**
+- `scripts/pm-knowledge-continuity.mjs` (Fase 3 P3-utvidet)
+- `scripts/__tests__/pm-knowledge-continuity.test.mjs` (ny, 55 tester)
+- `docs/engineering/PM_SELF_TEST_HEURISTICS.md` (ny — per-spørsmål-anker-tabell)
+- `docs/operations/PM_KNOWLEDGE_CONTINUITY_V2.md` (utvidet med Fase 3 P3-eksempler)
+- `docs/adr/0024-pm-knowledge-enforcement-architecture.md`
+- `.claude/skills/pm-orchestration-pattern/SKILL.md` v1.6.0
+- Meta-pattern (paraphrase-validation med per-felt-anker) brukt også i Tier-3 (`verify-context-comprehension.mjs`) og delivery-report-gate (`validate-delivery-report.mjs`)
+
 ---
 
 ## §12 DB-resilience
@@ -4084,4 +4109,5 @@ Lim hele kontrakten inn i agent-prompten.
 | 2026-05-15 | Lagt til §6.19 — E2E plan-run-reset må bruke appens Oslo business-date, ikke Postgres `CURRENT_DATE`, ellers lekker plan-posisjon 7/jackpot-state i CI rundt norsk midnatt. Total 109→110 entries. | PM-AI (purchase_open CI follow-up) |
 | 2026-05-15 | Lagt til §6.20 — Pilot-flow Rad-vinst-test må drive scheduled draws eksplisitt fordi CI kjører med `JOBS_ENABLED=false`; ikke slå på scheduler-jobs for å få testen grønn. Total 110→111 entries. | PM-AI (purchase_open CI follow-up 2) |
 | 2026-05-16 | Lagt til §11.23 — live-test må ha frozen Sentry/PostHog snapshot før/etter, ellers blir agent-evidence muntlig og ureviderbar. Ny `npm run observability:snapshot`. | PM-AI (observability snapshot runner) |
+| 2026-05-16 | Lagt til §11.24 — PM self-test fritekst-svar uten konkret pack-anker. Fase 3 P3-follow-up av ADR-0024: per-spørsmål-heuristikk i `scripts/pm-knowledge-continuity.mjs` med 12 konkrete anker-regex + fluff-reject + `[self-test-bypass:]`-marker. 55 tester. Etablerer meta-pattern (paraphrase-validation med per-felt-anker) — nå brukt i 3 gates. Ny doc: `docs/engineering/PM_SELF_TEST_HEURISTICS.md`. | PM-AI (Fase 3 P3 — self-test heuristikk) |
 | 2026-05-16 | Lagt til §9.10 — Render External Database URL er full-access, ikke read-only. Opprettet `spillorama_pm_readonly` og koblet observability-runner til `postgres-readonly.env`. | PM-AI (DB observability read-only role) |
