@@ -154,7 +154,7 @@ Tobias presiserte 2026-05-08: Bokstav er en **gevinstmønster-variant for Spill 
 | Gul | 10 kr | × 2 |
 | Lilla | 15 kr | × 3 |
 
-**Bongstørrelse-konvensjon:** Hver farge har Small og Large variant. Engine bruker slug-form `small_yellow`, `large_yellow`, etc. Large = 2× Small per default.
+**Bongstørrelse-konvensjon:** Hver farge har Small og Large variant. Engine bruker slug-form `small_yellow`, `large_yellow`, etc. Large bong = 3 brett til 3× pris (`LARGE_TICKET_PRICE_MULTIPLIER = 3` i `GamePlanEngineBridge.ts:304`, endret fra 2 → 3 commit `c3f086745` 2026-05-13). Per-brett-pris forblir lik Small-prisen for samme farge (eks. Large Gul: 30 kr for 3 brett = 10 kr/brett, samme som Small Gul). Multiplier-semantikken er detaljert beskrevet i kommende `PURCHASE_FLOW_ARCHITECTURE_AUDIT` (Fase 4 av ADR-0024).
 
 **Premie-mekanikk:** Auto-multiplikator (untatt Trafikklys). Premier oppgis som base for 5 kr-bong; backend skalerer til 10 kr × 2 og 15 kr × 3.
 

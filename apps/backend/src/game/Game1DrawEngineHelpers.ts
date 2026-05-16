@@ -641,10 +641,25 @@ export function pickTrafikklysRowColor(
  *   - Gul (10 kr) bonger     → multiplier 2 (small) eller 4 (large)
  *   - Lilla (15 kr) bonger   → multiplier 3 (small) eller 6 (large)
  *
- * **Viktig:** Etter bridge-konvensjon (LARGE_TICKET_PRICE_MULTIPLIER = 2)
- * koster `large_yellow` 20 kr, så multiplier = 4. `large_purple` koster
- * 30 kr → multiplier 6. Dette stemmer med formelen i §3.1:
- * `actualPrize = base × (ticketPrice / 500)`.
+ * ⚠️ STALE DOCSTRING — VERIFISERES I FASE 4 AUDIT (PURCHASE_FLOW_ARCHITECTURE_AUDIT)
+ *
+ * Denne docstringen ble skrevet da `LARGE_TICKET_PRICE_MULTIPLIER = 2` i
+ * `GamePlanEngineBridge.ts`. Konstanten ble endret til **3** 2026-05-13
+ * (commit `c3f086745`). Returnverdiene under reflekterer fortsatt det
+ * GAMLE prising-regimet:
+ *   - Old: large_yellow = 20 kr → multiplier 4
+ *   - New: large_yellow = 30 kr → multiplier SKAL være 6 (hvis semantikken
+ *          fortsatt er "kr / 5")
+ *
+ * **Hvorfor verdiene IKKE er endret her:** Funksjonen kalles fra 4 sites
+ * i `Game1DrawEngineService.ts` (payout-engine). Endring av returnverdier
+ * uten full verifisering av alle call-sites er en potensiell P0-regresjon
+ * mot Lotteritilsynet-rapportering. Konsulent-review 2026-05-16 flagget
+ * dette som "latent bug" — full vurdering hører i Fase 4 audit.
+ *
+ * **Hvis du rører denne funksjonen:** Verifiser alle 4 call-sites i
+ * `Game1DrawEngineService` (linjer ~2873, ~2918, ~3350, ~3381), kjør
+ * `SpillVerification.13Catalog.test.ts` og oppdater PITFALLS_LOG §1.9.
  *
  * Returnerer null for ukjente slugs — caller faller tilbake til
  * `patternPrizeToCents` (eksisterende auto-mult-path).
