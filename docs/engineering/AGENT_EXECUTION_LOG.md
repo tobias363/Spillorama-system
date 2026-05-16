@@ -4820,3 +4820,27 @@ Cart `[1 Stor hvit, 1 Stor gul, 1 Stor lilla]` ble committed som ÉN `app_game1_
 **Læring:**
 - BuyPopup-design må løses med to samtidige hensyn: visuell mockup er fasit for spilleropplevelse, men eksisterende DOM-indekser er test-kontrakt. Bruk skjulte compat-ankere eller CSS-order/wrappers; ikke flytt top-level DOM uten å oppdatere test-kontrakter eksplisitt.
 - `Du kjøper` hører visuelt hjemme i ticket-wrapperen, ikke i headeren. Hvis den legges i headeren blir popupen både mindre lik designet og høyere enn nødvendig.
+
+### 2026-05-16 — PM-AI: Spill 1 bong-grid vertikal spacing under top-HUD
+
+**Agent-type:** PM/self-implementation-agent
+**Branch:** `codex/game1-bong-spacing-2026-05-16`
+**Scope:** Tobias ba om lik spacing mellom top-elementene og bongene, og at øverste bongrad flyttes nærmere top-HUD slik at mer av skjermhøyden brukes til bonger.
+
+**Evidence brukt før kode:**
+- `.claude/skills/spill1-center-top-design/SKILL.md` — top-HUD-wrapper-kontrakt, kolonne-rekkefølge og anti-patterns for statisk layout.
+- `.claude/skills/bong-design/SKILL.md` — parent-grid eier `gap: 16px`, og bong-card spacing må ikke løses med per-card padding.
+- `packages/game-client/src/games/game1/screens/PlayScreen.ts` — `TICKET_TOP = 239` var fortsatt hardkodet fra eldre layout.
+
+**Outputs:**
+- `PlayScreen.ts` — erstattet statisk `TICKET_TOP` med målt top-posisjon: faktisk `top-group-wrapper`-bunn relativt til overlay-root + `16px`.
+- `PlayScreen.ts` — ticket-grid høyden beregnes nå fra den dynamiske top-posisjonen, slik at redusert top-gap gir mer synlig bong-område.
+- `PlayScreen.ts` — ticket-grid repositioneres etter status-render og etter CenterTopPanel/LeftInfoPanel-oppdateringer.
+- `.claude/skills/spill1-center-top-design/SKILL.md` v1.3.1 — dokumenterer ticket-grid vertikal spacing-invariant.
+- `docs/engineering/PITFALLS_LOG.md` §7.39 — ny fallgruve om hardkodet ticket-grid top-gap.
+- Browser-verifisering etter `npm run build:games`: `top-group-wrapper.bottom=277`, `ticket-grid.top=293`, faktisk gap `16px`.
+
+**Læring:**
+- Når top-HUD er en levende HTML-wrapper, skal bong-grid posisjoneres mot faktisk målt HUD-bunn, ikke historiske pixel-konstanter.
+- 16px spacing er riktig felles visuelt språk her fordi bong-gridens parent-gap allerede bruker 16px.
+- Top-HUD kan endre høyde etter subkomponent-oppdateringer; layouten må repositioneres etter ferdig render, ikke bare på viewport-resize.

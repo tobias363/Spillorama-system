@@ -50,14 +50,14 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§4 Live-rom-state](#4-live-rom-state) | 7 | 2026-05-10 |
 | [§5 Git & PR-flyt](#5-git--pr-flyt) | 16 | 2026-05-15 |
 | [§6 Test-infrastruktur](#6-test-infrastruktur) | 18 | 2026-05-15 |
-| [§7 Frontend / Game-client](#7-frontend--game-client) | 32 | 2026-05-16 |
+| [§7 Frontend / Game-client](#7-frontend--game-client) | 33 | 2026-05-16 |
 | [§8 Doc-disiplin](#8-doc-disiplin) | 8 | 2026-05-15 |
 | [§9 Konfigurasjon / Environment](#9-konfigurasjon--environment) | 9 | 2026-05-13 |
 | [§10 Routing & Permissions](#10-routing--permissions) | 3 | 2026-05-10 |
 | [§11 Agent-orkestrering](#11-agent-orkestrering) | 20 | 2026-05-15 |
 | [§12 DB-resilience](#12-db-resilience) | 1 | 2026-05-14 |
 
-**Total:** 118 entries (per 2026-05-16)
+**Total:** 119 entries (per 2026-05-16)
 
 ---
 
@@ -3332,6 +3332,45 @@ for høy popup.
 
 ---
 
+### §7.39 — Ticket-grid top-gap må måles fra faktisk top-HUD, ikke hardkodes
+
+**Severity:** P2 (frontend layout / bong-synlighet)
+**Oppdaget:** 2026-05-16 (Tobias-feedback etter top-HUD + triplet-layout iterasjoner)
+**Status:** LØST 2026-05-16
+
+**Symptom:**
+Etter at top-HUD ble flyttet inn i ett felles bordered element, lå første
+bongrad fortsatt for langt under HUD-en. Det var lik funksjonalitet, men
+unødvendig tomrom mellom top-elementene og bongene gjorde at færre bonger fikk
+plass i viewporten før scroll.
+
+**Root cause:**
+`PlayScreen` brukte en statisk `TICKET_TOP = 239` fra eldre layout. Etter flere
+top-HUD-iterasjoner endret faktisk HUD-høyde og plassering seg, men
+ticket-grid fulgte ikke etter. Dermed ble gapet en historisk rest, ikke en
+bevisst spacing-regel.
+
+**Fix:**
+`PlayScreen.positionTicketGrid()` måler nå faktisk
+`top-group-wrapper.getBoundingClientRect().bottom` relativt til overlay-root og
+legger på `16px` spacing før ticket-grid plasseres. Når top-HUD status/body
+eller CenterTopPanel/LeftInfoPanel-innhold endrer layout, repositioneres gridet.
+
+**Prevention:**
+- Ikke gjeninnfør hardkodet `TICKET_TOP` for Spill 1 når top-HUD endres.
+- Ticket-grid skal starte `16px` under faktisk top-HUD-bunn, samme
+  spacing-familie som bong-gridens `gap: 16px`.
+- Ved layoutendringer i `top-group-wrapper`: mål både HUD-bunn og første
+  bongrad i browser, ikke vurder gapet kun visuelt.
+
+**Filer endret:**
+- `packages/game-client/src/games/game1/screens/PlayScreen.ts`
+- `.claude/skills/spill1-center-top-design/SKILL.md`
+
+**Related:** Skill `spill1-center-top-design` v1.3.1, §7.32, §7.33, §7.35
+
+---
+
 ## §8 Doc-disiplin
 
 ### §8.1 — BACKLOG.md går stale uten review
@@ -4165,3 +4204,4 @@ Lim hele kontrakten inn i agent-prompten.
 | 2026-05-16 | Lagt til §11.24 — PM self-test fritekst-svar uten konkret pack-anker. Fase 3 P3-follow-up av ADR-0024: per-spørsmål-heuristikk i `scripts/pm-knowledge-continuity.mjs` med 12 konkrete anker-regex + fluff-reject + `[self-test-bypass:]`-marker. 55 tester. Etablerer meta-pattern (paraphrase-validation med per-felt-anker) — nå brukt i 3 gates. Ny doc: `docs/engineering/PM_SELF_TEST_HEURISTICS.md`. | PM-AI (Fase 3 P3 — self-test heuristikk) |
 | 2026-05-16 | Lagt til §9.10 — Render External Database URL er full-access, ikke read-only. Opprettet `spillorama_pm_readonly` og koblet observability-runner til `postgres-readonly.env`. | PM-AI (DB observability read-only role) |
 | 2026-05-16 | Lagt til §7.38 — BuyPopup-design må separere test-låst DOM-kontrakt fra visuell mockup. Header én linje, `Du kjøper` nederst i ticket-wrapper, no-scroll-verifisering i visual-harness. Total 117→118 entries. | PM-AI (BuyPopup design parity) |
+| 2026-05-16 | Lagt til §7.39 — Ticket-grid top-gap må måles fra faktisk top-HUD, ikke hardkodes. `PlayScreen` plasserer nå bongene `16px` under målt `top-group-wrapper`-bunn og reposerer etter status/endring. Total 118→119 entries. | PM-AI (Spill 1 bong vertical spacing) |
