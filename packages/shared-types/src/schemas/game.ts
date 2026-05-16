@@ -215,6 +215,26 @@ export type TicketSelection = z.infer<typeof TicketSelectionSchema>;
 export const TicketTypeInfoSchema = z.object({
   name: z.string(),
   type: z.string(),
+  /**
+   * Wire-format multiplier brukt på tvers av room-snapshot, klient-state
+   * og lobby-display. **NB:** Denne kalles "multiplier" men har historisk
+   * blitt brukt med tre forskjellige semantikker i codebasen:
+   *
+   * 1. **Color-tier-multiplier** — ratio til billigste bong-farge
+   *    (Hvit=1, Gul=2, Lilla=3 ved 5/10/15 kr-priser).
+   * 2. **Size-multiplier** — antall brett per bong (Small=1, Large=3
+   *    siden 2026-05-13, commit `c3f086745`).
+   * 3. **Combined / pakke-pris-multiplier** — color × size (eks. Large
+   *    Yellow = 2 × 3 = 6). Brukes i wire-formatet til buy-popup.
+   *
+   * Conflation av disse tre er rot-årsaken til ≥ 11 PITFALLS-entries
+   * (se §§1.7, 1.9, 3.11, 7.18, 7.21 osv.). Kanonisk semantikk vil bli
+   * definert i `PURCHASE_FLOW_ARCHITECTURE_AUDIT` (Fase 4 av ADR-0024).
+   *
+   * **Inntil Fase 4 lander:** behold "combined multiplier"-semantikken
+   * når du leser dette feltet. Slå opp tolkning per call-site hvis
+   * tvilstilfelle. IKKE refactor på egen hånd.
+   */
   priceMultiplier: z.number(),
   ticketCount: z.number().int(),
   colors: z.array(z.string()).optional(),
