@@ -4793,3 +4793,30 @@ Cart `[1 Stor hvit, 1 Stor gul, 1 Stor lilla]` ble committed som ÉN `app_game1_
 - `.claude/skills/pm-orchestration-pattern/SKILL.md`
 - `docs/engineering/PITFALLS_LOG.md`
 - `docs/engineering/AGENT_EXECUTION_LOG.md`
+
+### 2026-05-16 — PM-AI: Game1 BuyPopup design-paritet mot kjopsmodal-design
+
+**Agent-type:** PM/self-implementation-agent
+**Scope:** Tobias sammenlignet live `Game1BuyPopup` med `kjopsmodal-design.html` og ba om 1:1 visuell paritet, pluss kompakt popup som ikke krever intern scroll i vanlig desktop/tablet viewport.
+
+**Evidence brukt før kode:**
+- Tobias-screenshot viste live popup til venstre og korrekt `kjopsmodal-design.html` til høyre.
+- `.claude/skills/buy-popup-design/SKILL.md` låste DOM-kontrakter: card child-indekser, `header.children[3] = lossStateEl`, og subtitle test-anchor via `letter-spacing: 0.14em`.
+- `Game1BuyPopup.test.ts`, `Game1BuyPopup.lossState.test.ts`, `Game1BuyPopup.displayName.test.ts` og `Game1BuyPopup.ticketCount.test.ts` beskytter eksisterende kontrakt.
+
+**Outputs:**
+- `packages/game-client/src/games/game1/components/Game1BuyPopup.ts` — synlig header er nå én linje (`Neste spill: {displayName}`), mens subtitle-div beholdes skjult som test-anchor.
+- `Game1BuyPopup.ts` — `Du kjøper` flyttet visuelt fra header til nederst i bordered ticket-wrapper (`typesContainer`) som full-width footer.
+- `Game1BuyPopup.ts` — tom statusmelding skjules helt, padding/spacing er komprimert, og popupen bruker `overflow: hidden` med `maxHeight: calc(100% - 24px)` for no-scroll-design.
+- `packages/game-client/src/visual-harness/visual-harness.ts` — buy-popup-scenarioet bruker nå 6 rader (Liten/Stor hvit/gul/lilla) og forhåndsvalgt `1x Liten hvit`, `1x Stor hvit`, `1x Liten gul`.
+- `.claude/skills/buy-popup-design/SKILL.md` v1.1.0 — dokumenterer skjult subtitle-anchor, summary-footer i ticket-wrapper og no-scroll-verifisering.
+- `docs/engineering/PITFALLS_LOG.md` §7.38 — ny fallgruve om å skille test-låst DOM-kontrakt fra visuell mockup.
+
+**Verifisering:**
+- `npm -w @spillorama/game-client run test -- Game1BuyPopup` — 32/32 tester passerte.
+- `npm -w @spillorama/game-client run check` — passerte.
+- Visual-harness `http://localhost:5175/web/games/visual-harness.html?scenario=buy-popup` — Playwright-måling viste `card.scrollHeight === card.clientHeight`, `fitsOverlay: true`, og ingen intern overflow.
+
+**Læring:**
+- BuyPopup-design må løses med to samtidige hensyn: visuell mockup er fasit for spilleropplevelse, men eksisterende DOM-indekser er test-kontrakt. Bruk skjulte compat-ankere eller CSS-order/wrappers; ikke flytt top-level DOM uten å oppdatere test-kontrakter eksplisitt.
+- `Du kjøper` hører visuelt hjemme i ticket-wrapperen, ikke i headeren. Hvis den legges i headeren blir popupen både mindre lik designet og høyere enn nødvendig.

@@ -173,6 +173,7 @@ export interface LossStateForBuyPopup {
 export class Game1BuyPopup {
   private backdrop: HTMLDivElement;
   private card: HTMLDivElement;
+  private titleEl: HTMLDivElement;
   private summaryEl: HTMLDivElement;
   /**
    * Spillerklient-rebuild Fase 1 (2026-05-10): subtitle-element holdes på
@@ -266,13 +267,13 @@ export class Game1BuyPopup {
     Object.assign(this.card.style, {
       background: "radial-gradient(ellipse at top, #2a0f12 0%, #1a0809 70%, #140607 100%)",
       borderRadius: "18px",
-      padding: "22px",
+      padding: "18px 20px 8px",
       color: TEXT,
       fontFamily: FONT_STACK,
       boxShadow: "0 30px 80px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(255, 200, 120, 0.08)",
       width: "min(580px, 92vw)",
-      maxHeight: "90vh",
-      overflowY: "auto",
+      maxHeight: "calc(100% - 24px)",
+      overflow: "hidden",
       position: "relative",
       boxSizing: "border-box",
       display: "flex",
@@ -288,45 +289,55 @@ export class Game1BuyPopup {
     //   header.children[2] = summaryEl
     //   header.children[3] = lossStateEl
     //
-    // Mockup viser title som "Neste spill: Bingo" sentrert. Vi holder
-    // strukturen som to separate `<div>`-er istedet for inline-span fordi
-    // displayName.test.ts kun søker `<div>`-elementer for å finne subtitle.
-    // Resultatet visuelt: "Neste spill" på linje 1, "Bingo" på linje 2 med
-    // gull-farge — som matcher mockup-en "Neste spill: <highlighted-name>".
+    // Mockup viser header som én linje: "Neste spill: Bingo". Samtidig
+    // beholder vi en egen, visuelt skjult subtitle-div med letter-spacing
+    // 0.14em fordi displayName-testene bruker den som uniqueness-marker.
     const header = document.createElement("div");
     Object.assign(header.style, {
-      marginBottom: "18px",
+      marginBottom: "16px",
       textAlign: "center",
       order: "0",
+      display: "flex",
+      alignItems: "baseline",
+      justifyContent: "center",
+      flexWrap: "wrap",
+      position: "relative",
     });
 
-    const title = document.createElement("div");
-    title.textContent = "Neste spill";
-    Object.assign(title.style, {
-      fontSize: "20px",
-      fontWeight: "500",
+    this.titleEl = document.createElement("div");
+    this.titleEl.textContent = `Neste spill: ${this.currentDisplayName}`;
+    Object.assign(this.titleEl.style, {
+      fontSize: "22px",
+      fontWeight: "700",
       color: TEXT,
       letterSpacing: "-0.01em",
       lineHeight: "1.1",
     });
-    header.appendChild(title);
+    header.appendChild(this.titleEl);
 
     // Subtitle-div — letter-spacing 0.14em er uniqueness-marker for
-    // displayName.test.ts. Default "Bingo" (catalog-display-navn).
+    // displayName.test.ts. Den er skjult visuelt; titleEl over er den
+    // faktiske headeren spilleren ser.
     this.subtitleEl = document.createElement("div");
     this.subtitleEl.textContent = this.currentDisplayName;
     Object.assign(this.subtitleEl.style, {
-      fontSize: "16px",
-      fontWeight: "600",
-      color: GOLD,
+      position: "absolute",
+      width: "1px",
+      height: "1px",
+      overflow: "hidden",
+      opacity: "0",
+      pointerEvents: "none",
+      fontSize: "1px",
       letterSpacing: "0.14em",
-      marginTop: "4px",
     });
     header.appendChild(this.subtitleEl);
 
-    this.summaryEl = document.createElement("div");
-    this.summaryEl.style.cssText = "margin-top:6px;";
-    header.appendChild(this.summaryEl);
+    // Compat-placeholder: header.children[2] må fortsatt finnes fordi eldre
+    // tester og skill-docs låser header.children[3] til lossStateEl. Den
+    // faktiske "Du kjøper"-summaryen rendres nederst i typesContainer.
+    const summaryCompatEl = document.createElement("div");
+    summaryCompatEl.style.display = "none";
+    header.appendChild(summaryCompatEl);
 
     // Tobias 2026-04-29 (post-orphan-fix UX): tap-status-header.
     // Skjult når lossState ikke er satt (legacy / tom).
@@ -346,6 +357,18 @@ export class Game1BuyPopup {
 
     this.card.appendChild(header);
 
+    this.summaryEl = document.createElement("div");
+    Object.assign(this.summaryEl.style, {
+      gridColumn: "1 / -1",
+      display: "none",
+      alignItems: "center",
+      flexWrap: "wrap",
+      gap: "6px",
+      paddingTop: "10px",
+      marginTop: "2px",
+      borderTop: "1px solid rgba(245,232,216,0.14)",
+    });
+
     // ── [1] Types grid (2-col) ─────────────────────────────────────────────
     //
     // ITER2 (Tobias 2026-05-15): DOM-index er 1 (test-locked), men visuelt
@@ -356,8 +379,12 @@ export class Game1BuyPopup {
     Object.assign(this.typesContainer.style, {
       display: "grid",
       gridTemplateColumns: "1fr 1fr",
-      rowGap: "10px",
-      columnGap: "24px",
+      rowGap: "7px",
+      columnGap: "8px",
+      padding: "8px 10px 10px",
+      background: "rgba(245,184,65,0.07)",
+      border: "1px solid rgba(255,255,255,0.18)",
+      borderRadius: "12px",
       order: "2",
     });
     this.card.appendChild(this.typesContainer);
@@ -371,11 +398,11 @@ export class Game1BuyPopup {
     // gir gap til typesContainer (matcher mockup-rytme).
     this.prizeMatrixEl = document.createElement("div");
     Object.assign(this.prizeMatrixEl.style, {
-      padding: "14px 14px 12px",
+      padding: "12px 14px 11px",
       background: "rgba(245,184,65,0.07)",
       border: "1px solid rgba(255,255,255,0.22)",
       borderRadius: "12px",
-      marginBottom: "18px",
+      marginBottom: "14px",
       boxShadow: "inset 0 1px 0 rgba(255,255,255,0.06), 0 0 0 1px rgba(255,255,255,0.04)",
       order: "1",
     });
@@ -389,9 +416,10 @@ export class Game1BuyPopup {
       fontSize: "13px",
       color: "#ff6b6b",
       textAlign: "center",
-      minHeight: "18px",
-      marginTop: "16px",
-      marginBottom: "8px",
+      minHeight: "0",
+      marginTop: "8px",
+      marginBottom: "4px",
+      display: "none",
       order: "3",
     });
     this.card.appendChild(this.statusMsg);
@@ -401,7 +429,7 @@ export class Game1BuyPopup {
     // ITER2 (Tobias 2026-05-15): `order: 4` — wrapper for totalRow.
     // 1px-divider over total-summary matcher mockup-stil.
     const sep = document.createElement("div");
-    sep.style.cssText = "background:transparent;margin:0 0 14px;order:4;";
+    sep.style.cssText = "background:transparent;margin:0 0 12px;order:4;";
     this.card.appendChild(sep);
 
     // ── Total row (inni en wrapper-div for å bevare child-indices) ─────────
@@ -556,6 +584,7 @@ export class Game1BuyPopup {
       const displayName = this.getDisplayName(tt);
       this.buildTypeRow(displayName, tt.type, tt.name, price, tt.ticketCount);
     }
+    this.typesContainer.appendChild(this.summaryEl);
 
     // Re-render premie-matrise med oppdaterte farger fra current ticket-set.
     this.renderPrizeMatrix();
@@ -573,6 +602,7 @@ export class Game1BuyPopup {
     this.cancelBtn.textContent = "Avbryt";
 
     this.statusMsg.textContent = "";
+    this.statusMsg.style.display = "none";
     this.renderLossState(lossState);
     this.updateTotal();
     this.backdrop.style.display = "flex";
@@ -604,6 +634,9 @@ export class Game1BuyPopup {
     this.currentDisplayName = next;
     if (this.subtitleEl) {
       this.subtitleEl.textContent = next;
+    }
+    if (this.titleEl) {
+      this.titleEl.textContent = `Neste spill: ${next}`;
     }
   }
 
@@ -688,6 +721,7 @@ export class Game1BuyPopup {
     if (success) {
       this.uiState = "success";
       this.statusMsg.style.color = "#81c784";
+      this.statusMsg.style.display = "block";
       this.statusMsg.textContent = message || "Registrert! Du er med i neste spill.";
       this.buyBtn.disabled = true;
       this.buyBtn.style.opacity = "0.5";
@@ -702,6 +736,7 @@ export class Game1BuyPopup {
     } else {
       this.uiState = "error";
       this.statusMsg.style.color = "#ff6b6b";
+      this.statusMsg.style.display = "block";
       this.statusMsg.textContent = message || "Kjøp feilet. Prøv igjen.";
       this.buyBtn.disabled = false;
       this.buyBtn.style.opacity = "1";
@@ -740,6 +775,7 @@ export class Game1BuyPopup {
         : "dagens tapsgrense nådd";
     const message = `${input.accepted} av ${input.accepted + input.rejected} bonger kjøpt — ${input.rejected} avvist (${reasonText}).`;
     this.statusMsg.style.color = "#fbbf24"; // amber for partial — neither full success nor failure
+    this.statusMsg.style.display = "block";
     this.statusMsg.textContent = message;
     if (input.lossState) {
       this.renderLossState(input.lossState);
@@ -807,7 +843,7 @@ export class Game1BuyPopup {
       justifyContent: "space-between",
       gap: "12px",
       padding: "10px 10px",
-      margin: "0 -10px",
+      margin: "0",
       borderRadius: "8px",
       background: "transparent",
     });
@@ -1277,14 +1313,18 @@ export class Game1BuyPopup {
     // Status-melding
     if (atHardCap) {
       this.statusMsg.style.color = "#ffe83d";
+      this.statusMsg.style.display = "block";
       this.statusMsg.textContent = "Du har maks 30 brett denne runden";
     } else if (totalBrett === 0) {
       this.statusMsg.textContent = "";
+      this.statusMsg.style.display = "none";
     } else if (remaining === 0) {
       this.statusMsg.style.color = "#81c784";
+      this.statusMsg.style.display = "block";
       this.statusMsg.textContent = "Maks 30 brett valgt";
     } else {
       this.statusMsg.textContent = "";
+      this.statusMsg.style.display = "none";
     }
 
     // SelectedSummary pills (i header.summaryEl).
@@ -1314,15 +1354,7 @@ export class Game1BuyPopup {
     this.summaryEl.innerHTML = "";
 
     if (selected.length === 0) {
-      const empty = document.createElement("div");
-      empty.textContent = "Ingen brett valgt";
-      Object.assign(empty.style, {
-        fontSize: "12px",
-        color: "rgba(245,232,216,0.4)",
-        fontStyle: "italic",
-        marginTop: "2px",
-      });
-      this.summaryEl.appendChild(empty);
+      this.summaryEl.style.display = "none";
       return;
     }
 
@@ -1332,7 +1364,6 @@ export class Game1BuyPopup {
       alignItems: "center",
       flexWrap: "wrap",
       gap: "6px",
-      marginTop: "6px",
     });
 
     const label = document.createElement("span");
@@ -1374,6 +1405,7 @@ export class Game1BuyPopup {
     }
 
     this.summaryEl.appendChild(wrap);
+    this.summaryEl.style.display = "flex";
   }
 
   private handleBuy(): void {
@@ -1390,6 +1422,7 @@ export class Game1BuyPopup {
     this.cancelBtn.style.opacity = "0.5";
     this.cancelBtn.style.cursor = "not-allowed";
     this.statusMsg.style.color = "rgba(245, 232, 216, 0.7)";
+    this.statusMsg.style.display = "block";
     this.statusMsg.textContent = "Sender forespørsel til server…";
     const selections = this.typeRows
       .filter((r) => r.qty > 0)
