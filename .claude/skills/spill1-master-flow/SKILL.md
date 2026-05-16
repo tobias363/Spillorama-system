@@ -2,7 +2,7 @@
 name: spill1-master-flow
 description: When the user/agent works with Spill 1 master-konsoll, plan-runtime, scheduled-game lifecycle, GoH-master-rom, or hall-ready-state. Also use when they mention master-actions, GamePlanRunService, GamePlanEngineBridge, Game1MasterControlService, Game1HallReadyService, Game1TransferHallService, Game1ScheduleTickService, Game1LobbyService, GameLobbyAggregator, MasterActionService, NextGamePanel, Spill1HallStatusBox, Spill1AgentControls, plan-run-id, scheduled-game-id, currentScheduledGameId, master-hall, ekskluderte haller, "Marker Klar", "Start neste spill", master-flyt, plan-runtime-koblingen, ADR-0021, ADR-0022, stuck-game-recovery, I14, I15, I16, BIN-1018, BIN-1024, BIN-1030, BIN-1041. Make sure to use this skill whenever someone touches the master/agent UI, plan or scheduled-game services, or anything related to who controls a Spill 1 round — even if they don't explicitly ask for it.
 metadata:
-  version: 1.21.0
+  version: 1.22.0
   project: spillorama
 ---
 
@@ -186,8 +186,23 @@ Baseline 2026-05-16:
 - Evidence: `docs/evidence/20260516-goh-full-plan-run/`
 - Human summary: `docs/operations/GOH_FULL_PLAN_TEST_RESULT_2026-05-16.md`
 
+4x80 escalation 2026-05-16:
+- Command: `scripts/dev/goh-full-plan-run.mjs --players-per-hall=80 --connect-delay-ms=2200 --join-delay-ms=60 --purchase-concurrency=8 --round-timeout-ms=900000`
+- Scope: 4 haller x 80 spillere = 320 samtidige syntetiske spillere.
+- Result: runner `status=passed`, 13/13 plan-spill completed.
+- Totals: 4160 purchases, 11960 ticket assignments, 167400 kr innsats, 782 draws, 89 winner-events.
+- Ticket expectation: 230 assignments per hall og 920 per runde (5 small x1 + 75 large x3). Runneren må ALDRI hardkode `4 * 50`.
+- Observability: Sentry/PostHog API snapshots var aktive før/midt/etter; pilot-monitor P0/P1 = 0.
+- Evidence: `docs/evidence/20260516-goh-full-plan-run-4x80/`
+- Human summary: `docs/operations/GOH_FULL_PLAN_4X80_TEST_RESULT_2026-05-16.md`
+
+Sentry-funn fra 4x80:
+- `SPILLORAMA-BACKEND-A` og `SPILLORAMA-BACKEND-8` viste N+1 Query på `POST /api/agent/game1/master/advance` og `POST /api/agent/game1/master/resume`.
+- Queryen var gjentatt `app_game_catalog WHERE id = $1` fra `GamePlanService.fetchItems()`.
+- Fix-mønster: `GameCatalogService.getByIds(ids)` + `GamePlanService.fetchCatalogEntries()` batch-loader catalog entries. Unit-stub fallback for `getById` beholdes kun for tester.
+
 Known anomalies fra baseline:
-- `ticket:mark` socket-flow feilet med `GAME_NOT_RUNNING` på alle runder, selv om server-side draw/pattern-eval fullførte. Dette er P1 og må undersøkes separat før man kaller live spiller-markering robust.
+- `ticket:mark` socket-flow feilet med `GAME_NOT_RUNNING` på alle runder, selv om server-side draw/pattern-eval fullførte. 4x80 bekreftet samme P1 med 164495 mark failures og 0 mark acks. Dette må fikses før man kaller live spiller-markering robust.
 - Engine pauset naturlig og ble auto-resumet 4 ganger per runde. Fullflyten overlever dette, men PM må avklare om dette er ønsket phase-pause-kontrakt.
 - Synthetic load-brukere kan arve RG-loss-ledger mellom lokale runs. Runneren resetter nå `app_rg_loss_entries`, `app_rg_personal_loss_limits` og pending limit changes for `demo-load-*`-brukere i demo-hallene.
 - Runnerens final-sjekk må behandle `GAME_PLAN_RUN_INVALID_TRANSITION` med `status=finished` som forventet sluttstate; ekstra advance etter ferdig plan er ikke produktfeil.
@@ -1257,3 +1272,4 @@ Ved tvil mellom kode og doc: **doc-en vinner**, koden må fikses. Spør Tobias f
 | 2026-05-15 | v1.20.2 — Pilot-flow CI follow-up: E2E plan-run-reset bruker nå appens Oslo business-date i stedet for Postgres `CURRENT_DATE`, fordi CI-run kl. 22:44 UTC er neste business-date i Oslo. Uten dette slettes feil dagsrad og senere specs arver jackpot-posisjon 7. Rad-vinst-spec forventer nå 12 rendered ticket-cards, som matcher én card per faktisk brett. PITFALLS §6.19. |
 | 2026-05-15 | v1.20.3 — Pilot-flow CI follow-up 2: Rad-vinst-spec driver scheduled draws eksplisitt via test-only `e2e-draw-next`/`scheduledDrawNext()` fordi workflowen kjører med `JOBS_ENABLED=false`. Ikke slå på scheduler-jobs i CI for å reparere denne testen; hold tests deterministiske og dokumenter scheduled draw-driveren. PITFALLS §6.20. |
 | 2026-05-16 | v1.21.0 — GoH full-plan baseline: `scripts/dev/goh-full-plan-run.mjs` kjørte `demo-pilot-goh` med 4 haller x 20 spillere gjennom alle 13 planposisjoner. Clean run PASSED, final plan-run `status=finished`, evidence lagret i `docs/evidence/20260516-goh-full-plan-run/`. Natural-end reconcile presisert: mid-plan `completed` er normal mellom-runde-state, ikke stuck. Dokumenterer også kjente anomalies: scheduled `ticket:mark` `GAME_NOT_RUNNING`, 4 auto-resumes per runde, stale RG-ledger-reset og runner final `status=finished`-kontrakt. PITFALLS §2.11, §3.18, §6.21-§6.23. |
+| 2026-05-16 | v1.22.0 — GoH full-plan 4x80 escalation: 320 samtidige syntetiske spillere gjennom alle 13 planposisjoner. Runner PASS, 4160 purchases, 11960 ticket assignments, 0 pilot-monitor P0/P1. Dokumenterer ny Sentry N+1 på master advance/resume og fix-mønsteret `GameCatalogService.getByIds` + batch `GamePlanService.fetchItems`. Bekrefter fortsatt P1: scheduled `ticket:mark` `GAME_NOT_RUNNING` (164495 failures, 0 acks). Evidence `docs/evidence/20260516-goh-full-plan-run-4x80/`. PITFALLS §4.8 + §6.24. |

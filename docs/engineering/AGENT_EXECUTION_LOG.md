@@ -4993,3 +4993,56 @@ Trygt slettbart UTEN data-tap: 2 + 5 + 240 worktrees + 52 stashes (kategorisk + 
 - `.claude/skills/pm-orchestration-pattern/SKILL.md`
 - `docs/engineering/PITFALLS_LOG.md`
 - `docs/engineering/AGENT_EXECUTION_LOG.md`
+
+### 2026-05-16 — PM-AI/Codex: GoH full-plan 4x80 load-test med Sentry/PostHog/DB snapshots
+
+**Agent-type:** PM/self-implementation + 3 explorer-agenter (test-harness, observability, DB-query pack)
+**Branch:** `codex/goh-80-load-test-2026-05-16`
+**Scope:** Tobias ba om ny testrunde etter at Sentry, PostHog og DB-tilkobling var på plass: alle 4 testhaller i Group of Halls, 80 spillere per hall, alle spill i spilleplanen, og full observability slik at gaps kan lukkes.
+
+**Evidence brukt før kode:**
+- 3 parallelle explorer-agenter: runner-scope (`scripts/dev/goh-full-plan-run.mjs`), observability setup (`scripts/dev/observability-snapshot.mjs`, Sentry/PostHog env), og DB-verifiseringsqueries.
+- `.claude/skills/spill1-master-flow/SKILL.md`, `.claude/skills/goh-master-binding/SKILL.md`, `.claude/skills/casino-grade-testing/SKILL.md`, `.claude/skills/live-room-robusthet-mandate/SKILL.md`.
+- Sentry API issue-detail for `SPILLORAMA-BACKEND-A` og `SPILLORAMA-BACKEND-8`.
+
+**Test gjennomført:**
+- Lokal backend startet med Sentry/PostHog env aktiv (`[sentry] ENABLED`, `[posthog] initialized`).
+- Pilot-monitor startet med push-daemon.
+- Observability snapshots kjørt før, midtveis og etter test:
+  - `docs/evidence/20260516-observability-goh-80-preflight-runtime-2026-05-16T22-06-45-624Z/`
+  - `docs/evidence/20260516-observability-goh-80-midrun-2026-05-16T22-28-30-479Z/`
+  - `docs/evidence/20260516-observability-goh-80-postrun-2026-05-16T22-48-56-853Z/`
+- Full GoH-run: 4 haller x 80 spillere = 320 samtidige syntetiske spillere, alle 13 planposisjoner.
+
+**Resultat:**
+- Runner status: `passed`.
+- 13/13 plan-spill completed.
+- 4160 purchases, 11960 ticket assignments, 167400 kr innsats, 782 draws, 89 winner-events.
+- Pilot-monitor: 0 P0/P1 i testvinduet.
+- PostHog deltas: `ticket.purchase.success +4160`, `spill1.master.start +13`, `spill1.payout.pattern +89`.
+- Persistent P1: `ticket:mark` feilet med `GAME_NOT_RUNNING` hele veien (164495 failures, 0 mark acks). Server-side draw/pattern-eval fullfører, men live socket-markering er fortsatt ikke frisk.
+
+**Kodeendringer:**
+- `scripts/dev/goh-full-plan-run.mjs` nekter nå non-local backend/PGHOST fordi runneren muterer DB-state.
+- `scripts/dev/goh-full-plan-run.mjs` beregner expected ticket assignments dynamisk fra faktisk `clients[]`; 80 spillere per hall gir 230 assignments per hall og 920 per runde.
+- `GameCatalogService.getByIds(ids)` lagt til som batch-read.
+- `GamePlanService.fetchItems()` bruker batch catalog-load via `fetchCatalogEntries()` i produksjon, med unit-test fallback for små stubs.
+- `GamePlanService.test.ts` har regression-test som sikrer én batch-call for duplicated catalog ids.
+
+**Dokumentasjon:**
+- `docs/operations/GOH_FULL_PLAN_4X80_TEST_RESULT_2026-05-16.md` — ny human report.
+- `docs/evidence/20260516-goh-full-plan-run-4x80/README.md` — oppdatert med nøkkelfunn.
+- `.claude/skills/spill1-master-flow/SKILL.md` v1.22.0.
+- `.claude/skills/goh-master-binding/SKILL.md` v1.2.0.
+- `docs/engineering/PITFALLS_LOG.md` §4.8 og §6.24.
+
+**Tester/verifikasjon:**
+- `node --check scripts/dev/goh-full-plan-run.mjs` — OK.
+- `npm exec -- tsx --test src/game/GamePlanService.test.ts` fra `apps/backend` — 35/35 pass.
+- `npm --prefix apps/backend run check` — TypeScript `tsc --noEmit` pass.
+- Full backend test-suite ble også kjørt via `npm --prefix apps/backend run test -- GamePlanService.test.ts`; scriptet ignorerte file-filteret og kjørte hele backend-suite: 11587 tester, 0 failures.
+
+**Læring:**
+- Observability må være API-frozen før/midt/etter, ikke bare "monitor kjører". Uten sammenlignbar preflight ville Sentry N+1 blitt muntlig mistanke.
+- Test-harness skal skaleres fra data, ikke fra baseline-antakelser. 4x20 hadde 200 tickets/runde; 4x80 har 920/runde.
+- Server-side completed er ikke nok for live-room robusthet. Så lenge `ticket:mark` har 0 acks, kan man ikke si at spillerklientens live-markering er Evolution-grade.

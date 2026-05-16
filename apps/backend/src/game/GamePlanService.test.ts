@@ -401,6 +401,72 @@ test("Fase 1 plan: deactivate() ukjent id → GAME_PLAN_NOT_FOUND", async () => 
   );
 });
 
+test("Fase 1 plan: getById() batch-loader catalog entries for items", async () => {
+  const catalogMap = new Map<string, GameCatalogEntry>([
+    ["gc-a", makeCatalogEntry({ id: "gc-a", slug: "bingo" })],
+    ["gc-b", makeCatalogEntry({ id: "gc-b", slug: "jackpot" })],
+  ]);
+  let batchCalls = 0;
+  let batchIds: string[] = [];
+  const catalogSvc = Object.create(
+    GameCatalogService.prototype,
+  ) as GameCatalogService & {
+    getByIds(ids: string[]): Promise<GameCatalogEntry[]>;
+  };
+  (catalogSvc as unknown as {
+    getByIds: (ids: string[]) => Promise<GameCatalogEntry[]>;
+  }).getByIds = async (ids: string[]) => {
+    batchCalls += 1;
+    batchIds = ids;
+    return ids
+      .map((id) => catalogMap.get(id))
+      .filter((entry): entry is GameCatalogEntry => Boolean(entry));
+  };
+
+  const { service } = makeCapturingService({
+    existingPlanRow: makeMinimalPlanRow(),
+    existingItems: [
+      {
+        id: "item-1",
+        plan_id: "gp-1",
+        position: 1,
+        game_catalog_id: "gc-a",
+        bonus_game_override: null,
+        notes: null,
+        created_at: new Date("2026-05-07T12:00:00Z"),
+      },
+      {
+        id: "item-2",
+        plan_id: "gp-1",
+        position: 2,
+        game_catalog_id: "gc-b",
+        bonus_game_override: null,
+        notes: null,
+        created_at: new Date("2026-05-07T12:00:00Z"),
+      },
+      {
+        id: "item-3",
+        plan_id: "gp-1",
+        position: 3,
+        game_catalog_id: "gc-a",
+        bonus_game_override: null,
+        notes: null,
+        created_at: new Date("2026-05-07T12:00:00Z"),
+      },
+    ],
+    catalogService: catalogSvc,
+  });
+
+  const plan = await service.getById("gp-1");
+
+  assert.equal(batchCalls, 1);
+  assert.deepEqual(batchIds.sort(), ["gc-a", "gc-b"]);
+  assert.equal(plan?.items.length, 3);
+  assert.equal(plan?.items[0]?.catalogEntry.id, "gc-a");
+  assert.equal(plan?.items[1]?.catalogEntry.id, "gc-b");
+  assert.equal(plan?.items[2]?.catalogEntry.id, "gc-a");
+});
+
 // ── setItems ─────────────────────────────────────────────────────────────
 
 test("Fase 1 plan: setItems() avviser tom planId", async () => {

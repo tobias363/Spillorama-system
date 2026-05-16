@@ -25,6 +25,7 @@ import type { GameCatalogService } from "./GameCatalogService.js";
 import {
   BONUS_GAME_SLUG_VALUES,
   type BonusGameSlug,
+  type GameCatalogEntry,
 } from "./gameCatalog.types.js";
 import type {
   CreateGamePlanInput,
@@ -436,10 +437,7 @@ export class GamePlanService {
     const uniqueCatalogIds = Array.from(
       new Set(items.map((i) => i.gameCatalogId)),
     );
-    const catalogById = new Map<string, Awaited<ReturnType<GameCatalogService["getById"]>>>();
-    for (const cid of uniqueCatalogIds) {
-      catalogById.set(cid, await this.catalogService.getById(cid));
-    }
+    const catalogById = await this.fetchCatalogEntries(uniqueCatalogIds);
     return items.map((item) => {
       const entry = catalogById.get(item.gameCatalogId);
       if (!entry) {
@@ -450,6 +448,35 @@ export class GamePlanService {
       }
       return { ...item, catalogEntry: entry };
     });
+  }
+
+  private async fetchCatalogEntries(
+    ids: string[],
+  ): Promise<Map<string, GameCatalogEntry>> {
+    const catalogById = new Map<string, GameCatalogEntry>();
+    const catalogService = this.catalogService as GameCatalogService & {
+      getByIds?: (ids: string[]) => Promise<GameCatalogEntry[]>;
+    };
+    const hasStubbedGetById = Object.prototype.hasOwnProperty.call(
+      catalogService,
+      "getById",
+    );
+
+    if (!hasStubbedGetById && typeof catalogService.getByIds === "function") {
+      const entries = await catalogService.getByIds(ids);
+      for (const entry of entries) {
+        catalogById.set(entry.id, entry);
+      }
+      return catalogById;
+    }
+
+    // Unit tests often inject a tiny catalog stub by overriding getById only.
+    // Keep that path available while production uses the batch read above.
+    for (const id of ids) {
+      const entry = await this.catalogService.getById(id);
+      if (entry) catalogById.set(id, entry);
+    }
+    return catalogById;
   }
 
   // ── writes ────────────────────────────────────────────────────────────

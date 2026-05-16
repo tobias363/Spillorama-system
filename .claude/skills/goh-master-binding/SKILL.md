@@ -2,7 +2,7 @@
 name: goh-master-binding
 description: When the user/agent works with Group of Halls (GoH) and the master-hall role for Spill 1 in the Spillorama bingo platform. Also use when they mention app_hall_groups, app_hall_group_members, master_hall_id, group_hall_id, transferHallAccess, Game1TransferHallService, Game1HallReadyService, resolveParticipatingHallIds, hall-membership filter, ON DELETE CASCADE, hall-cascade-strategy, GoH master pin, BIN-1034, BIN-1038, BIN-453, master-rolle-modellen, master-hall-velger, participating_halls_json, agent-portal master-actions, hall-deactivation, master fallback to run.hall_id, pilot 4-hall (Teknobingo Årnes + Bodø + Brumunddal + Fauske). The master-rolle-modellen says master is a bingovert with extra responsibility, NOT a separate role — the route-guard checks hall-id, not user.role. Make sure to use this skill whenever someone touches hall-group SQL, master_hall_id resolution, transferHallAccess, scheduled-game spawn, or per-hall ready-state — even if they don't mention GoH directly — because mis-binding the master_hall_id silently corrupts every Spill 1 run for that GoH.
 metadata:
-  version: 1.1.0
+  version: 1.2.0
   project: spillorama
 ---
 
@@ -109,8 +109,18 @@ Kanonisk lokal evidence for pilot-GoH:
 - Evidence: `docs/evidence/20260516-goh-full-plan-run/`
 - Human summary: `docs/operations/GOH_FULL_PLAN_TEST_RESULT_2026-05-16.md`
 
+4x80 escalation:
+
+- Command: `node scripts/dev/goh-full-plan-run.mjs --players-per-hall=80 --connect-delay-ms=2200 --join-delay-ms=60 --purchase-concurrency=8 --round-timeout-ms=900000`
+- Scope: `demo-pilot-goh`, 4 haller x 80 spillere = 320 samtidige testspillere.
+- Result: PASSED, alle 13 Spill 1-planposisjoner completed.
+- Per-runde forventning: 230 ticket assignments per hall, 920 per runde.
+- Evidence: `docs/evidence/20260516-goh-full-plan-run-4x80/`
+- Human summary: `docs/operations/GOH_FULL_PLAN_4X80_TEST_RESULT_2026-05-16.md`
+- Observability: Sentry/PostHog snapshots før/midt/etter; pilot-monitor P0/P1 = 0.
+
 Known findings:
-- `ticket:mark` socket-flow feilet med `GAME_NOT_RUNNING` på alle runder selv om server-side draw/pattern-eval fullførte. Dette er ikke en GoH-master-binding feil bevist enda, men neste debug må sjekke room-code/currentScheduledGameId/status-resolver i scheduled Spill 1 socket-path.
+- `ticket:mark` socket-flow feilet med `GAME_NOT_RUNNING` på alle runder selv om server-side draw/pattern-eval fullførte. 4x80 bekreftet 164495 mark failures og 0 mark acks. Dette er ikke en GoH-master-binding feil bevist enda, men neste debug må sjekke room-code/currentScheduledGameId/status-resolver i scheduled Spill 1 socket-path.
 - Ingen P0/P1 fra pilot-monitor under clean rerun; monitor genererte runde-rapporter 44-56 for alle 13 runder.
 - Synthetic `demo-load-*`-brukere må RG-resettes mellom lokale full-plan-runs, ellers kan `LOSS_LIMIT_EXCEEDED` komme fra stale local testdata.
 
@@ -142,6 +152,8 @@ Known findings:
 - Plan-Spill-kobling fundament: `docs/architecture/PLAN_SPILL_KOBLING_FUNDAMENT_AUDIT_2026-05-08.md`
 - GoH full-plan evidence: `docs/evidence/20260516-goh-full-plan-run/`
 - GoH full-plan result summary: `docs/operations/GOH_FULL_PLAN_TEST_RESULT_2026-05-16.md`
+- GoH full-plan 4x80 evidence: `docs/evidence/20260516-goh-full-plan-run-4x80/`
+- GoH full-plan 4x80 result summary: `docs/operations/GOH_FULL_PLAN_4X80_TEST_RESULT_2026-05-16.md`
 - HallGroupService: `apps/backend/src/game/HallGroupService.ts`
 - Hall-ready-service: `apps/backend/src/game/Game1HallReadyService.ts`
 - Transfer-service: `apps/backend/src/game/Game1TransferHallService.ts`

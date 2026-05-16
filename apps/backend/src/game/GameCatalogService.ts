@@ -551,6 +551,25 @@ export class GameCatalogService {
     return rows[0] ? mapRow(rows[0]) : null;
   }
 
+  async getByIds(ids: string[]): Promise<GameCatalogEntry[]> {
+    const uniqueIds = Array.from(
+      new Set(ids.map((id) => id?.trim()).filter(Boolean)),
+    );
+    if (uniqueIds.length === 0) return [];
+
+    const { rows } = await this.pool.query<GameCatalogRow>(
+      `SELECT id, slug, display_name, description, rules_json,
+              ticket_colors_json, ticket_prices_cents_json, prizes_cents_json,
+              prize_multiplier_mode,
+              bonus_game_slug, bonus_game_enabled, requires_jackpot_setup,
+              is_active, sort_order, created_at, updated_at, created_by_user_id
+       FROM ${this.table()}
+       WHERE id = ANY($1::text[])`,
+      [uniqueIds],
+    );
+    return rows.map(mapRow);
+  }
+
   async getBySlug(slug: string): Promise<GameCatalogEntry | null> {
     if (!slug?.trim()) {
       throw new DomainError("INVALID_INPUT", "slug er påkrevd.");
