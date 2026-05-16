@@ -4080,6 +4080,35 @@ Lim hele kontrakten inn i agent-prompten.
 - `.claude/skills/pm-orchestration-pattern/SKILL.md` v1.6.0
 - Meta-pattern (paraphrase-validation med per-felt-anker) brukt også i Tier-3 (`verify-context-comprehension.mjs`) og delivery-report-gate (`validate-delivery-report.mjs`)
 
+### §11.25 — Agent-contract bygd men ikke adoptert i daglig flyt (0/35 high-risk spawns)
+
+**Severity:** P2 (PM-workflow-svekkelse, ikke akutt prod-risiko, men hele §11.19-fix forblir aspirasjonell uten denne)
+**Oppdaget:** 2026-05-16 (audit etter Fase 3 P3 merget)
+**Symptom:** Audit 2026-05-16 viste at `scripts/generate-agent-contract.sh` ble committet 2026-05-15 (b772ccfd7), men siste 4 dagers AGENT_EXECUTION_LOG har **0 entries** som eksplisitt brukte `npm run agent:contract`. Estimat: ~35 high-risk agent-spawns burde brukt kontrakt. Faktisk bruk: 0. PM (selv inkludert) leverer fortsatt fri-tekst-prompts — nøyaktig §11.19-mønsteret som scriptet skulle løse.
+**Root cause:** `AGENT_TASK_CONTRACT.md` Regel 1 ("PM skal ikke spawne implementation-agent på high-risk kode uten kontrakt") er æresnorm uten teknisk håndhevelse. Skill-doc-protokoll §2.19 sier "lim inn template", men ingen gate verifiserer at det skjedde. PM under tidspress skipper steget; PR-side gates fanger ikke pre-spawn-fritekst.
+**Fix (Fase A av ADR-0024):**
+- Ny `.github/workflows/agent-contract-gate.yml` — PR-side gate som krever `Contract-ID:` + `Contract-path:` i PR-body for high-risk paths, eller `[agent-contract-not-applicable: <begrunnelse min 20 tegn>]` bypass. Shadow-mode 2026-05-16 → 2026-05-23, hard-fail tidligst 2026-05-24.
+- Ny `scripts/validate-pr-agent-contract.mjs` (29 tester) — validator-script som workflow-en kaller.
+- Ny `scripts/pm-spawn-agent.sh` — lokal wrapper som genererer kontrakt + persisterer til `docs/evidence/<contract-id>/` og printer PR-body-linjer.
+- PR-template utvidet med Agent Contract-seksjon.
+- Ny label `approved-agent-contract-bypass`.
+- Eksplisitt layered defense over knowledge-protocol/delivery-report/delta-report (POST-delivery) — agent-contract-gate er PRE-spawn.
+**Prevention:**
+- Bruk `bash scripts/pm-spawn-agent.sh ...` før agent-spawn — wrapperen genererer + persisterer kontrakt + printer PR-body-linjer
+- PR-template minner PM på `Contract-ID:`-feltet
+- Etter 2026-05-24: PR-en kan ikke merges uten enten gyldig contract-reference eller approved bypass-label
+- Per ADR-0024 konsolideringskriterier: hvis agent-contract bypass-frekvens > 20% etter shadow-mode, kalibrer gate
+**Related:**
+- `.github/workflows/agent-contract-gate.yml` (ny)
+- `scripts/validate-pr-agent-contract.mjs` (ny, 29 tester)
+- `scripts/__tests__/validate-pr-agent-contract.test.mjs` (ny)
+- `scripts/pm-spawn-agent.sh` (ny)
+- `scripts/bypass-telemetry.mjs` (ny, 26 tester) + `bypass-telemetry-weekly.yml` (ny cron)
+- `.github/pull_request_template.md` (utvidet)
+- `docs/adr/0024-pm-knowledge-enforcement-architecture.md` (utvidet med Fase A endrings-log)
+- `.claude/skills/pm-orchestration-pattern/SKILL.md` v1.7.0
+- §11.19 (high-risk fritekst-prompt) — Fase A er den tekniske håndhevelsen som §11.19 manglet
+
 ---
 
 ## §12 DB-resilience
@@ -4202,6 +4231,7 @@ Lim hele kontrakten inn i agent-prompten.
 | 2026-05-15 | Lagt til §6.20 — Pilot-flow Rad-vinst-test må drive scheduled draws eksplisitt fordi CI kjører med `JOBS_ENABLED=false`; ikke slå på scheduler-jobs for å få testen grønn. Total 110→111 entries. | PM-AI (purchase_open CI follow-up 2) |
 | 2026-05-16 | Lagt til §11.23 — live-test må ha frozen Sentry/PostHog snapshot før/etter, ellers blir agent-evidence muntlig og ureviderbar. Ny `npm run observability:snapshot`. | PM-AI (observability snapshot runner) |
 | 2026-05-16 | Lagt til §11.24 — PM self-test fritekst-svar uten konkret pack-anker. Fase 3 P3-follow-up av ADR-0024: per-spørsmål-heuristikk i `scripts/pm-knowledge-continuity.mjs` med 12 konkrete anker-regex + fluff-reject + `[self-test-bypass:]`-marker. 55 tester. Etablerer meta-pattern (paraphrase-validation med per-felt-anker) — nå brukt i 3 gates. Ny doc: `docs/engineering/PM_SELF_TEST_HEURISTICS.md`. | PM-AI (Fase 3 P3 — self-test heuristikk) |
+| 2026-05-16 | Lagt til §11.25 — Agent-contract bygd men ikke adoptert i daglig flyt (0/35 high-risk spawns). Fase A av ADR-0024 layered defense: pre-spawn agent-contract-gate (shadow-mode 2026-05-16 → 2026-05-23, hard-fail tidligst 2026-05-24) + bypass-telemetri-script + ukentlig cron. Validerer `Contract-ID:` + `Contract-path:` for high-risk PR-er, eller `[agent-contract-not-applicable:]` bypass. 29 + 26 tester. | PM-AI (Fase A — pre-spawn evidence gate) |
 | 2026-05-16 | Lagt til §9.10 — Render External Database URL er full-access, ikke read-only. Opprettet `spillorama_pm_readonly` og koblet observability-runner til `postgres-readonly.env`. | PM-AI (DB observability read-only role) |
 | 2026-05-16 | Lagt til §7.38 — BuyPopup-design må separere test-låst DOM-kontrakt fra visuell mockup. Header én linje, `Du kjøper` nederst i ticket-wrapper, no-scroll-verifisering i visual-harness. Total 117→118 entries. | PM-AI (BuyPopup design parity) |
 | 2026-05-16 | Lagt til §7.39 — Ticket-grid top-gap må måles fra faktisk top-HUD, ikke hardkodes. `PlayScreen` plasserer nå bongene `16px` under målt `top-group-wrapper`-bunn og reposerer etter status/endring. Total 118→119 entries. | PM-AI (Spill 1 bong vertical spacing) |

@@ -117,6 +117,37 @@ Følge-arbeid:
 
 Ikke implementert i denne PR-en for å holde scope tett.
 
+### Fase A follow-up (2026-05-16): pre-spawn agent-contract-gate som layered defense
+
+Audit 2026-05-16 viste at 0/35 high-risk agent-spawns brukte `npm run agent:contract` siste 4 dager — infrastrukturen som ble bygd er ikke adoptert. PITFALLS §11.19 dokumenterte at fri-tekst-PM-prompts gir misforstått scope, men gate-en som skulle fange dette eksisterte ikke før Fase A.
+
+**Layered defense (eksplisitt ikke duplikat av eksisterende gates):**
+
+| Gate | Tidspunkt | Hva sjekkes |
+|---|---|---|
+| **agent-contract-gate** (Fase A) | PRE-spawn evidence | Ble agenten gitt en korrekt kontrakt FØR arbeid startet? |
+| `knowledge-protocol-gate` | POST-delivery | Ble skill/PITFALLS/AGENT_EXECUTION_LOG oppdatert etter arbeid? |
+| `delivery-report-gate` | POST-delivery | Har PR-body 8-seksjon delivery-report med §5 cross-check? |
+| `delta-report-gate` | POST-delivery | Finnes `docs/delta/<dato>-<branch>.md` med påkrevde seksjoner? |
+
+Disse 4 gate-ene dekker **forskjellige feilmoduser** ved forskjellige tidsvindu. agent-contract-gate er **ikke** en duplikat-bypass-vei — den lukker et hull ingen av de andre gate-ene fanger (pre-spawn fritekst-prompt). Bypass-syntaks `[agent-contract-not-applicable: <reason min 20 tegn>]` + label `approved-agent-contract-bypass` er bevisst forskjellig fra eksisterende markers for å unngå overload.
+
+**Shadow-mode 2026-05-16 → 2026-05-23:**
+
+- Workflow kommenterer på PR ved feilet validering, men blokkerer ikke
+- Comment-tekst: "Ville blokkert ved full håndhevelse"
+- Etter 2026-05-23 vurderes flip til hard-fail ved Tobias/PM-gjennomgang av false-positives
+- Hard-fail tidligst: 2026-05-24
+- Flip-dato dokumenteres i denne ADR-en endrings-log (under Implementasjon)
+
+**Bypass-telemetri bygget samtidig (`scripts/bypass-telemetry.mjs` + `bypass-telemetry-weekly.yml`):**
+
+- Søndag 18:00 UTC cron
+- Detekterer 12 bypass-markører (alle gate-er)
+- Genererer Markdown-rapport + JSON
+- Åpner GH-issue når ADR-0024 konsolideringskriterier treffes
+- Erstatter manuell sporing — konsolideringskriteriene utløses nå automatisk
+
 ## Konsekvenser
 
 ### Positive
@@ -184,6 +215,14 @@ Følge-PR-er (ikke i denne):
 - Persistent evidence-storage i `docs/evidence/` (Fase 2)
 - `scripts/validate-delivery-report.mjs` + CI-gate (Fase 3)
 - Server-side checkpoint-signering med OIDC (Fase 3)
+
+## Endrings-log (post-merge tillegg)
+
+ADR-er er normalt immutable etter merge, men denne ADR-en har et endrings-log-felt for å spore hvilke konkrete follow-up-PR-er som implementerer det ADR-en lover. Hver entry må peke til konkret PR + dato + scope.
+
+| Dato | Endring | PR | Notater |
+|---|---|---|---|
+| 2026-05-16 | **Fase A:** pre-spawn agent-contract-gate (shadow-mode 2026-05-16 → 2026-05-23) + `scripts/bypass-telemetry.mjs` + weekly cron. Eksplisitt layered defense over knowledge-protocol/delivery-report/delta-report gate-ene. | TBD (denne PR) | Hard-fail tidligst 2026-05-24 etter PM-vurdering av false-positives. Flip-dato dokumenteres her når besluttet. |
 
 ## Referanser
 
