@@ -5,7 +5,9 @@ This repository uses a PR-first workflow with protected `main` and automated CI/
 ## 1) Branch and commit model
 
 - Never work directly on `main`.
-- Create branches with prefix: `codex/<short-topic>`.
+- Create branches with lane-specific prefix:
+  - `codex/<short-topic>-YYYY-MM-DD` for Codex/runtime work.
+  - `claude/<short-topic>-YYYY-MM-DD` for Claude/knowledge-structure work.
 - Keep commits small and atomic.
 - Use conventional commit style:
   - `feat(scope): ...`
@@ -22,6 +24,10 @@ git add frontend/index.html frontend/app.js frontend/style.css
 git commit -m "feat(frontend): add transfer amount chooser modal"
 git push -u origin codex/wallet-transfer-ui
 ```
+
+When Codex and Claude work in parallel, follow
+[`AI_BRANCH_COORDINATION_PROTOCOL.md`](../operations/AI_BRANCH_COORDINATION_PROTOCOL.md)
+before touching shared knowledge, workflow or package files.
 
 ## 2) Pull request flow
 
@@ -97,8 +103,8 @@ npm --prefix apps/backend run test:compliance
 npm --prefix apps/backend run build
 ```
 
-> Note: The legacy Unity project lives under `legacy/unity-client/` and has its
-> own test tooling. See [legacy/README.md](../../legacy/README.md) for details.
+> Note: Legacy Unity parity is documented in the parity/code-review docs in
+> this directory. The Unity source tree is not present in this repo snapshot.
 
 ## 7) Legacy-avkobling Done-policy
 
