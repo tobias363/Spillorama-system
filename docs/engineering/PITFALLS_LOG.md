@@ -4109,6 +4109,36 @@ Lim hele kontrakten inn i agent-prompten.
 - `.claude/skills/pm-orchestration-pattern/SKILL.md` v1.7.0
 - §11.19 (high-risk fritekst-prompt) — Fase A er den tekniske håndhevelsen som §11.19 manglet
 
+### §11.26 — Worktree+stash baggage akkumulerer (400 worktrees / 178 stashes)
+
+**Severity:** P3 (operasjonell hygiene, ikke prod-risiko, men disk-bruk + kognitiv last)
+**Oppdaget:** 2026-05-16 (audit) — 2026-05-17 (Fase B-cleanup-scripts levert)
+**Symptom:** Etter ~6 uker prosjekt har repo akkumulert:
+- 401 git-worktrees (varav 240 ORPHANED — path slettet, men git-entry beholdt; 152 LOCKED-UNSAFE med uncommittet/upushet arbeid; kun 2 SAFE + 5 LOCKED-S)
+- 178 git-stashes (52 klart safe via mønster-deteksjon: 1 AUTO-BACKUP + 17 AGENT-LEFTOVER + 34 MERGED-BRANCH; 91 UNCLEAR — typisk squash-merget branch som ser "unmerged" lokalt; 32 FRESH)
+
+Hver fix-PR auto-deleter sin branch på origin men ikke lokal worktree. Hver gang PM bytter scope midt i agent-arbeid skapes ny "agent-leftover"-stash. Ingen mekanisme rydder dette.
+
+**Root cause:** PR-merge med `--delete-branch` sletter remote branch + lokal branch, men IKKE worktree-mappe. `git stash` lager backup men har ingen TTL/cleanup-rutine.
+
+**Fix:**
+- Ny `scripts/cleanup-merged-worktrees.sh` med safety-verdict per worktree (SAFE/LOCKED-S/ORPHANED/UNSAFE_*/CURRENT/MAIN). DRY-RUN BY DEFAULT. `--apply` for interaktiv per-item Y/N. `--include-locked` for å inkludere LOCKED-S.
+- Ny `scripts/cleanup-stale-stashes.sh` med kategorisering (AUTO-BACKUP/AGENT-LEFTOVER/MERGED-BRANCH/FRESH/EXPLICIT-KEEP/UNCLEAR). DRY-RUN BY DEFAULT. `--apply` for interaktiv. `--min-age N` for terskel (default 7d).
+- Begge støtter `--json` for maskinlesbar output.
+- Sikkerhet: UNSAFE-verdikter slettes ALDRI. UNCLEAR-stashes (squash-merge-edge-case) krever manuell vurdering. EXPLICIT-KEEP-mønstre (pre-rebase, recovery, rescue) beholdes alltid.
+- `PM_SESSION_END_CHECKLIST.md` Trinn 10 (valgfri) peker til scriptene.
+
+**Prevention:**
+- Kjør cleanup-script ved sesjons-slutt (Trinn 10 i PM_SESSION_END_CHECKLIST)
+- Bash 3.2-kompatibel (macOS default) — bruk simple counters, ikke `declare -A`
+- For squash-merge-edge-case: bruk `gh pr list --state merged --search "head:<branch>"` for å avgjøre om en UNCLEAR-stash er trygg
+
+**Related:**
+- `scripts/cleanup-merged-worktrees.sh` (ny)
+- `scripts/cleanup-stale-stashes.sh` (ny)
+- `docs/operations/PM_SESSION_END_CHECKLIST.md` Trinn 10
+- `.claude/skills/pm-orchestration-pattern/SKILL.md` v1.8.0
+
 ---
 
 ## §12 DB-resilience
@@ -4232,6 +4262,7 @@ Lim hele kontrakten inn i agent-prompten.
 | 2026-05-16 | Lagt til §11.23 — live-test må ha frozen Sentry/PostHog snapshot før/etter, ellers blir agent-evidence muntlig og ureviderbar. Ny `npm run observability:snapshot`. | PM-AI (observability snapshot runner) |
 | 2026-05-16 | Lagt til §11.24 — PM self-test fritekst-svar uten konkret pack-anker. Fase 3 P3-follow-up av ADR-0024: per-spørsmål-heuristikk i `scripts/pm-knowledge-continuity.mjs` med 12 konkrete anker-regex + fluff-reject + `[self-test-bypass:]`-marker. 55 tester. Etablerer meta-pattern (paraphrase-validation med per-felt-anker) — nå brukt i 3 gates. Ny doc: `docs/engineering/PM_SELF_TEST_HEURISTICS.md`. | PM-AI (Fase 3 P3 — self-test heuristikk) |
 | 2026-05-16 | Lagt til §11.25 — Agent-contract bygd men ikke adoptert i daglig flyt (0/35 high-risk spawns). Fase A av ADR-0024 layered defense: pre-spawn agent-contract-gate (shadow-mode 2026-05-16 → 2026-05-23, hard-fail tidligst 2026-05-24) + bypass-telemetri-script + ukentlig cron. Validerer `Contract-ID:` + `Contract-path:` for high-risk PR-er, eller `[agent-contract-not-applicable:]` bypass. 29 + 26 tester. | PM-AI (Fase A — pre-spawn evidence gate) |
+| 2026-05-17 | Lagt til §11.26 — Worktree+stash baggage akkumulerer (400 worktrees / 178 stashes). Fase B av ADR-0024 follow-up: cleanup-scripts med safety-verdict per item, DRY-RUN BY DEFAULT, `--apply` for interaktiv sletting. Worktree-script identifiserer SAFE/LOCKED-S/ORPHANED/UNSAFE_*/CURRENT/MAIN. Stash-script kategoriserer AUTO-BACKUP/AGENT-LEFTOVER/MERGED-BRANCH/FRESH/EXPLICIT-KEEP/UNCLEAR. Bash 3.2-kompatibel. | PM-AI (Fase B — lokal cleanup-scripts) |
 | 2026-05-16 | Lagt til §9.10 — Render External Database URL er full-access, ikke read-only. Opprettet `spillorama_pm_readonly` og koblet observability-runner til `postgres-readonly.env`. | PM-AI (DB observability read-only role) |
 | 2026-05-16 | Lagt til §7.38 — BuyPopup-design må separere test-låst DOM-kontrakt fra visuell mockup. Header én linje, `Du kjøper` nederst i ticket-wrapper, no-scroll-verifisering i visual-harness. Total 117→118 entries. | PM-AI (BuyPopup design parity) |
 | 2026-05-16 | Lagt til §7.39 — Ticket-grid top-gap må måles fra faktisk top-HUD, ikke hardkodes. `PlayScreen` plasserer nå bongene `16px` under målt `top-group-wrapper`-bunn og reposerer etter status/endring. Total 118→119 entries. | PM-AI (Spill 1 bong vertical spacing) |
