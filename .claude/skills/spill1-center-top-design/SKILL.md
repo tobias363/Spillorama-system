@@ -2,7 +2,7 @@
 name: spill1-center-top-design
 description: When the user/agent works with the Spill 1 `center-top` HTML overlay — the combo panel (mini-grid + premietabell) and action-panel (game name + jackpot + Forhåndskjøp/Kjøp flere/Start spill) rendered above the Pixi canvas. Also use when they mention CenterTopPanel.ts, ensurePatternWonStyles, premie-row, premie-cell, mini-grid, prize-pill, premie-design.html, PatternMiniGrid, jackpot-display, setBuyMoreDisabled, setPreBuyDisabled, setGameRunning, setCanStartNow, swapMiniGrid, animateWinFlash, flashAmount, customPatternListView, autoClaimPhaseMode, top-group-wrapper, LeftInfoPanel, action-panel, combo-panel, eller mockup-iterasjon I-V. Make sure to use this skill whenever someone touches `packages/game-client/src/games/game1/components/CenterTopPanel.ts` or related premie/mini-grid mockup-er — even if the change looks like "just CSS" — because the panel sits over Pixi-canvas (no-backdrop-filter rule), gjenbrukes av Spill 3 (customPatternListView injection), og endringer i layout påvirker kollisjon mellom combo-panel og action-panel.
 metadata:
-  version: 1.3.0
+  version: 1.3.1
   project: spillorama
 ---
 
@@ -38,6 +38,12 @@ top-group-wrapper (eies av PlayScreen.ts — IKKE CenterTopPanel)
 ```
 
 **Status-kolonnen, lykketall-kolonnen, player-info, mini-grid og knappe-blokken speiles i mockup-en for kontekst, men IKKE alle eies av CenterTopPanel.** Status/lykketall og top-row-order eies av `PlayScreen`, player-info eies av `LeftInfoPanel`, og `top-group-wrapper` eies av `PlayScreen`. CenterTopPanel eier combo + actions, men PlayScreen kan flytte `actionRootEl` for riktig rekkefølge.
+
+### Ticket-grid vertikal spacing
+
+Tobias-direktiv 2026-05-16: Øverste bongrad skal ligge tett og symmetrisk under top-HUD-en slik at skjermhøyde brukes på bonger, ikke tomrom. `PlayScreen.positionTicketGrid()` skal derfor måle faktisk `top-group-wrapper.getBoundingClientRect().bottom` og plassere ticket-grid `16px` under den. Ikke gjeninnfør en statisk `TICKET_TOP = 239`-lignende konstant som ikke følger faktisk HUD-høyde.
+
+**Invariant:** Avstanden mellom top-HUD og første bongrad skal følge samme visuelle spacing-familie som bong-gridens `gap: 16px`. Når status/body eller CenterTopPanel-content i top-HUD endrer høyde, må ticket-grid repositioneres etter ferdig top-HUD-render.
 
 ## Pixel-spec (mockup iterasjon V, 2026-05-14)
 
@@ -234,6 +240,7 @@ Når Tobias godkjenner ny mockup-iterasjon:
 | La `Innsats` bryte i player-info-kolonnen | Bruk `font-size:14px`, `line-height:1.35`, `white-space:nowrap` |
 | Bruk `align-self:center` for å sentrere top-HUD horisontalt | `overlayRoot` er flex-row; behold `align-self:flex-start` og bruk auto-margins/spacing på inline-aksen |
 | Sett både `margin-left:auto` og `margin-right:auto` på `top-group-wrapper` | Chat-panelet har egen auto-margin; bruk `margin-left:auto; margin-right:0` på top-HUD |
+| Hardkode ticket-grid-top etter gammel top-HUD | Mål faktisk `top-group-wrapper`-bunn og legg på `16px` spacing |
 
 ## Relaterte ADR-er
 
@@ -245,6 +252,7 @@ Når Tobias godkjenner ny mockup-iterasjon:
 
 | Dato | Endring | Author |
 |---|---|---|
+| 2026-05-16 | v1.3.1 — Ticket-grid top-posisjon måles nå dynamisk fra faktisk `top-group-wrapper`-bunn + `16px`. Dette fjerner gammel tomromsbuffer under top-HUD og bruker mer skjermhøyde til bonger uten å overlappe top-elementene. | PM-AI |
 | 2026-05-16 | v1.3.0 — `HOVEDSPILL 1`/action-panel flyttet rett etter `next-game-status-column` via `CenterTopPanel.actionRootEl` re-parenting i `PlayScreen.ts`. `LeftInfoPanel` bet-info er nowrap/14px slik at "Innsats: X kr" holder én rad, og `top-group-wrapper` sentreres med `margin-left:auto; margin-right:0` fordi chat-panelet eier den andre auto-marginen. | PM-AI |
 | 2026-05-16 | v1.2.0 — Status-tekst ("Neste spill" / "Spill pågår") flyttet ut av løs CenterBall-idle-visning og inn som `next-game-status-column` i `top-group-wrapper`. Rekkefølge endret til status → player-info → lykketall → CenterTopPanel. | PM-AI |
 | 2026-05-16 | v1.1.0 — Lykketall/firkløver-kolonnen flyttet inn i `top-group-wrapper` som første bordered kolonne. Mockup `premie-design.html` oppdatert med samme `lucky-number-panel`. Tobias-direktiv 2026-05-16. | PM-AI |

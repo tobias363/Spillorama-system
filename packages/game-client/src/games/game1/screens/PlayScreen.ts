@@ -51,7 +51,8 @@ const STATUS_COLUMN_WIDTH = 155;
 // Kept in sync with CHAT_OPEN_WIDTH_PX / CHAT_COLLAPSED_WIDTH_PX in ChatPanelV2.
 const CHAT_WIDTH = 265;
 const CHAT_COLLAPSED_WIDTH = 110;
-const TICKET_TOP = 239;
+const TICKET_GAP_BELOW_TOP_HUD = 16;
+const TICKET_TOP_FALLBACK = 210;
 /** Fast x-posisjon for ticket-grid (frakoblet fra top-radens posisjon). */
 const TICKET_LEFT = 155;
 /** Y-offset reservert under ticket-grid. Bølge G (2026-05-05) — manuell
@@ -122,6 +123,7 @@ export class PlayScreen extends Container {
   private readonly nextGameStatusTitleEl: HTMLDivElement;
   private readonly nextGameStatusNameEl: HTMLDivElement;
   private readonly nextGameStatusBodyEl: HTMLDivElement;
+  private readonly topGroupWrapper: HTMLDivElement;
   /** Standalone Pixi text for "X/Y" drawn-ball counter under the ring.
    * NOT a child of CenterBall so the idle-float tween doesn't move it. */
   private readonly drawCountText: Text;
@@ -512,6 +514,7 @@ export class PlayScreen extends Container {
     topGroupWrapper.appendChild(cloverColumn);
     topGroupWrapper.appendChild(this.centerTop.rootEl);
     overlayRoot.appendChild(topGroupWrapper);
+    this.topGroupWrapper = topGroupWrapper;
     this.centerBall.visible = false;
     this.updateTopHudStatus("next-game");
 
@@ -815,6 +818,7 @@ export class PlayScreen extends Container {
     this.centerTop.setCanStartNow(state.canStartNow, running);
     this.centerTop.updateJackpot(state.jackpot);
     this.headerBar.update(state.jackpot); // kept for API parity (no-op render)
+    this.positionTicketGrid();
 
     // Auto-open the buy popup on entry so the player doesn't have to hunt for
     // the "Forhåndskjøp" button. One-shot per screen-session (see
@@ -1534,6 +1538,7 @@ export class PlayScreen extends Container {
     this.nextGameStatusBodyEl.textContent = body;
     this.nextGameStatusBodyEl.style.display = body ? "block" : "none";
     this.lastTopHudStatusSignature = signature;
+    this.positionTicketGrid();
   }
 
   /** Build the glass-tube HTML overlay that sits over the Pixi ball-column.
@@ -1689,10 +1694,24 @@ export class PlayScreen extends Container {
     // Frakoblet fra ring-posisjon (TUBE_COLUMN_WIDTH) — tickets beholder
     // opprinnelig plassering selv om top-raden flyttes.
     const left = TICKET_LEFT;
-    const top = TICKET_TOP;
+    const top = this.ticketTop();
     const width = this.screenW - left - this.chatWidth() - 20;
-    const height = this.screenH - TICKET_TOP - CLAIM_AREA;
+    const height = this.screenH - top - CLAIM_AREA;
     this.ticketGrid.setBounds(left, top, Math.max(200, width), Math.max(100, height));
+  }
+
+  private ticketTop(): number {
+    const overlayRoot = this.overlayManager.getRoot();
+    const rootRect = overlayRoot.getBoundingClientRect();
+    const topHudRect = this.topGroupWrapper.getBoundingClientRect();
+    const measuredTop = Math.ceil(
+      topHudRect.bottom - rootRect.top + TICKET_GAP_BELOW_TOP_HUD,
+    );
+
+    if (!Number.isFinite(measuredTop) || topHudRect.height <= 0) {
+      return TICKET_TOP_FALLBACK;
+    }
+    return measuredTop;
   }
 
   /**
