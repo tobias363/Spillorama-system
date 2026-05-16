@@ -69,6 +69,33 @@ PM skal ikke åpne eller merge PR basert på en agentleveranse før rapporten sv
 
 Unntak er bare tillatt for rene mekaniske endringer, for eksempel format-only, ren rename eller config-pin. Unntaket skal stå eksplisitt i PR-body med hvorfor skill/PITFALLS/AGENT_EXECUTION_LOG ikke ble oppdatert.
 
+## Teknisk håndhevelse (Fase 3 — ADR-0024 follow-up)
+
+PR-er som rører high-risk paths (apps/backend/src/game/, wallet/, compliance/, sockets/, draw-engine/, migrations/, packages/game-client/games/game1-3/, shared-types/, admin-web cash-inout + agent-portal, og agent/admin game-routes) blokkeres av [`delivery-report-gate.yml`](../../.github/workflows/delivery-report-gate.yml) hvis:
+
+- Rapporten mangler én av de 8 H3-headerne med eksakt norsk tittel (`### 1. Context read before changes` osv.)
+- §5 "Knowledge updates" hevder at en skill / PITFALLS_LOG / AGENT_EXECUTION_LOG-fil ble oppdatert, men diff'en inneholder ikke filen
+- §4 "Tests and verification" mangler både backtick-kommando og eksplisitt "ikke kjørt" + begrunnelse
+- §8 "Ready for PR" mangler "ja"/"nei" eller "Reason:"-linje
+
+**Validatoren kjøres lokalt før push** (anbefalt):
+
+```bash
+echo "$PR_BODY" | node scripts/validate-delivery-report.mjs --body-stdin --base origin/main
+```
+
+**Bypass-marker (for mekaniske endringer eller ikke-applicable scenarier):**
+
+```
+[delivery-report-not-applicable: <begrunnelse min 10 tegn>]
+```
+
+Marker krever én av disse labels for å passere gate-en:
+- `approved-delivery-report-bypass` — vanlig bypass godkjent av Tobias/CODEOWNER
+- `approved-emergency-merge` — for P1 hotfix-incidents (se [`INCIDENT_MODE_VS_KNOWLEDGE_PROTOCOL.md`](../operations/INCIDENT_MODE_VS_KNOWLEDGE_PROTOCOL.md))
+
+Bypass uten label gir bare warning, ikke fail (per nå — kan tightenes hvis bypass overforbrukes per ADR-0024 konsolideringskriterier).
+
 ---
 
 ## Hvorfor rapporten er streng

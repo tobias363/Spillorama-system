@@ -3529,6 +3529,32 @@ Lim hele kontrakten inn i agent-prompten.
 - `docs/engineering/AGENT_TASK_CONTRACT.md` Regel 9 (Fase 2)
 - `docs/adr/0024-pm-knowledge-enforcement-architecture.md`
 
+### §11.22 — Agent Delivery Report fritekst aksepteres uten teknisk validering
+
+**Severity:** P2 (PM-tid + risiko for at agent-leveranse merges uten oppdaterte kunnskapsartefakter)
+**Oppdaget:** 2026-05-16 (konsulent-review Fase 3 etter ADR-0024)
+**Symptom:** PM må manuelt eyeballe 8 H3-seksjoner i hver agent-leveranse-PR. Når 6 agenter leverer parallelt blir det 48 sjekkbokser. Stor sjanse for at PR merges der §5 "Knowledge updates" hevder skill/PITFALLS/AGENT_EXECUTION_LOG ble oppdatert men diff'en ikke inneholder filene.
+**Root cause:** AGENT_DELIVERY_REPORT_TEMPLATE definerer formatet, men ingen workflow eller hook validerer at PR-body følger malen eller at §5-claims matcher diff. Honor-system under PM-press.
+**Fix:**
+- Ny `scripts/validate-delivery-report.mjs` (32 tester) som validerer:
+  - Alle 8 H3-headere finnes med eksakt norsk tittel
+  - §4 "Tests" har backtick-kommando ELLER eksplisitt "ikke kjørt" + begrunnelse
+  - §5 "Knowledge updates"-paths cross-checkes mot diff (skill / PITFALLS / AGENT_EXECUTION_LOG)
+  - §8 "Ready for PR" har "ja"/"nei" + "Reason:"-linje
+- Ny `delivery-report-gate.yml` workflow som fyrer på high-risk paths (samme liste som delta-report-gate)
+- Bypass via `[delivery-report-not-applicable: <begrunnelse min 10 tegn>]` + label `approved-delivery-report-bypass` eller `approved-emergency-merge`
+**Prevention:**
+- PR-er som rører pilot/wallet/compliance/live-room kan ikke merges uten gyldig delivery-report (eller dokumentert bypass)
+- Lokal pre-push-validering anbefalt: `node scripts/validate-delivery-report.mjs --body-stdin --base origin/main`
+- Per ADR-0024 konsolideringskriterier: hvis bypass brukes > 20% av PR-er i 30 dager, vurder gate-justering
+**Related:**
+- `scripts/validate-delivery-report.mjs` (ny)
+- `scripts/__tests__/validate-delivery-report.test.mjs` (ny, 32 tester)
+- `.github/workflows/delivery-report-gate.yml` (ny)
+- `docs/engineering/AGENT_DELIVERY_REPORT_TEMPLATE.md` (utvidet med "Teknisk håndhevelse"-seksjon)
+- `docs/adr/0024-pm-knowledge-enforcement-architecture.md`
+- `.claude/skills/pm-orchestration-pattern/SKILL.md` v1.5.0
+
 ---
 
 ## §12 DB-resilience
@@ -3634,6 +3660,7 @@ Lim hele kontrakten inn i agent-prompten.
 | 2026-05-15 | Lagt til §11.18 — implementation-agent uten forensic evidence etter gjentatt live-test-feil. Standardisert `scripts/purchase-open-forensics.sh` før B.1/B.2/B.3 velges. Total 106→107 entries. | PM-AI (purchase_open handoff-hardening) |
 | 2026-05-15 | Lagt til §11.19 — high-risk agent-prompt som fritekst gir misforstått scope. Standardisert `npm run agent:contract` før implementation-agent. Total 107→108 entries. | PM-AI (agent-contract-hardening) |
 | 2026-05-16 | Lagt til §11.20 (agent-contract uten skill-SHA-lockfile mister reproduserbarhet) + §11.21 (evidence-pack i /tmp overlever ikke audit). Fase 2-follow-up av ADR-0024: skill-SHA-lockfile + persistent evidence i `docs/evidence/<contract-id>/`. Total 108→110 entries. | PM-AI (Fase 2 — skill-lockfile + evidence-persistence) |
+| 2026-05-16 | Lagt til §11.22 (Agent Delivery Report fritekst aksepteres uten teknisk validering). Fase 3 Punkt 1-follow-up av ADR-0024: ny `scripts/validate-delivery-report.mjs` (32 tester) + `delivery-report-gate.yml` workflow som blokkerer high-risk PR-er uten gyldig 8-seksjon-rapport med §5 cross-check mot diff. Total 110→111 entries. | PM-AI (Fase 3 P1 — delivery-report-gate) |
 | 2026-05-15 | Lagt til §3.17 — purchase_open-vinduet ble hoppet over fordi plan-runtime opprettet `ready_to_start` og master-start kalte engine i samme request. Total 108→109 entries. | PM-AI (purchase_open P0 fix) |
 | 2026-05-15 | Lagt til §6.19 — E2E plan-run-reset må bruke appens Oslo business-date, ikke Postgres `CURRENT_DATE`, ellers lekker plan-posisjon 7/jackpot-state i CI rundt norsk midnatt. Total 109→110 entries. | PM-AI (purchase_open CI follow-up) |
 | 2026-05-15 | Lagt til §6.20 — Pilot-flow Rad-vinst-test må drive scheduled draws eksplisitt fordi CI kjører med `JOBS_ENABLED=false`; ikke slå på scheduler-jobs for å få testen grønn. Total 110→111 entries. | PM-AI (purchase_open CI follow-up 2) |
