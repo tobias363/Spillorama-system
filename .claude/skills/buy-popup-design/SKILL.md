@@ -2,7 +2,7 @@
 name: buy-popup-design
 description: When the user/agent works with the Game1BuyPopup ticket-purchase modal — premietabell, ticket-rows (Liten/Stor × 3 farger), stepper, "Du kjøper"-summary chips, or the kjopsmodal-design.html mockup. Also use when they mention Game1BuyPopup, BuyPopup, kjopsmodal-design, PrizeMatrix, premietabell, auto-multiplikator (5/10/15 kr), BONG_PALETTE, MiniBongChip, BongMini, setBuyPopupTicketConfig, setBuyPopupDisplayName, setBuyPopupLossState, lobbyTicketConfig, Tobias-bekreftet 2026-05-15 buy-popup, Spill 1 ticket-purchase. Make sure to use this skill whenever someone touches `packages/game-client/src/games/game1/components/Game1BuyPopup.ts` — even if they don't mention buy-popup-design directly — because changes to the BuyPopup must match the kjopsmodal-design.html mockup 1:1.
 metadata:
-  version: 1.0.0
+  version: 1.1.0
   project: spillorama
 ---
 
@@ -32,7 +32,7 @@ Alle 3 spill går gjennom **samme** `Game1BuyPopup.ts`. Komponenten må derfor v
 
 ### 4 sub-elementer i mockup
 
-1. **Header** — "Neste spill" + subtitle (catalog-display-navn i gull, letter-spacing 0.14em)
+1. **Header** — én synlig linje: "Neste spill: {catalog-display-navn}"
 2. **Premietabell** — 5 phases (1 Rad, 2 Rader, 3 Rader, 4 Rader, Fullt Hus) × N farger
 3. **Ticket-grid** — 2-col grid med Liten/Stor × {Hvit, Gul, Lilla} (eller subset)
 4. **Total + Knapper** — "Totalt: X brett / Y kr" + grønn primær Kjøp + sekundær Avbryt
@@ -42,7 +42,7 @@ Alle 3 spill går gjennom **samme** `Game1BuyPopup.ts`. Komponenten må derfor v
 Tests assumer denne rekkefølgen — `Game1BuyPopup.test.ts`, `Game1BuyPopup.lossState.test.ts`:
 
 ```
-card.children[0] = header (title + subtitle + summaryEl + lossStateEl)
+card.children[0] = header (title + hidden subtitle test-anchor + hidden summary compat + lossStateEl)
 card.children[1] = typesContainer (2-col grid med ticket-rader)
 card.children[2] = prizeMatrixEl (NY i 2026-05-15-iterasjon)
 card.children[3] = statusMsg
@@ -58,18 +58,19 @@ card.children[6] = cancelBtn
 `Game1BuyPopup.lossState.test.ts` bruker `getHeader(container).children[3]` for `lossStateEl`:
 
 ```
-header.children[0] = title-div ("Neste spill")
-header.children[1] = subtitle-div (letter-spacing 0.14em, holder catalog-navn)
-header.children[2] = summaryEl
+header.children[0] = title-div ("Neste spill: {catalogDisplayName}" — synlig)
+header.children[1] = subtitle-div (letter-spacing 0.14em, skjult test-anchor)
+header.children[2] = hidden summary compat placeholder
 header.children[3] = lossStateEl
 ```
 
 ### Subtitle uniqueness-marker
 
-`Game1BuyPopup.displayName.test.ts` finner subtitle via `letter-spacing: 0.14em` på et `<div>`-element. To regler:
+`Game1BuyPopup.displayName.test.ts` finner subtitle via `letter-spacing: 0.14em` på et `<div>`-element. Dette elementet er nå visuelt skjult; `titleEl` er den synlige headeren. To regler:
 
 1. **Subtitle MÅ være `<div>`**, ikke `<span>` — testen søker kun `<div>`
 2. **Letter-spacing 0.14em er reservert** — andre elementer i komponenten MÅ bruke annet (eks. premietabell-header "PREMIETABELL" bruker 0.12em for å unngå falsk match)
+3. **Ikke bruk subtitle-diven som synlig layout-element** — oppdater både `subtitleEl.textContent` og synlig `titleEl.textContent = "Neste spill: X"` i `setDisplayName`.
 
 ## Pixel-spec (kjopsmodal-design.html, Tobias 2026-05-15)
 
@@ -80,7 +81,9 @@ header.children[3] = lossStateEl
 | `.card` bredde | `min(580px, 92vw)` |
 | `.card` bakgrunn | `radial-gradient(ellipse at top, #2a0f12 0%, #1a0809 70%, #140607 100%)` |
 | `.card` border-radius | 18px |
-| `.card` padding | 22px |
+| `.card` padding | `18px 20px 8px` i prod (`kjopsmodal-design.html` er stor mockup; prod er kompakt for no-scroll i game-container) |
+| `.card` max-height | `calc(100% - 24px)` |
+| `.card` overflow | `hidden` — ingen intern scroll i normal desktop/tablet viewport |
 | `.card` box-shadow | `0 30px 80px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(255,200,120,0.08)` |
 
 ### Bong-palette (matcher mockup `COLORS`)
@@ -110,10 +113,20 @@ const BONG_PALETTE = {
 
 | Element | Verdi |
 |---|---|
-| Grid | `2-col, row-gap 16px, column-gap 65px` |
-| Row | flex, gap 12px, padding 10px |
+| Grid/wrapper | `2-col`, `row-gap: 7px`, `column-gap: 8px`, `padding: 8px 10px 10px`, shared border/background/radius |
+| Row | flex, gap 12px, padding 10px, no negative margin |
 | Stepper | inline-flex, height 32px, border-radius 8px, rgba(255,255,255,0.04) bg når inaktiv / rgba(245,184,65,0.12) når aktiv |
 | Plus/minus | width 30px, transparent bg, color rgba(245,232,216,0.75) |
+
+### SelectedSummary (`Du kjøper`)
+
+`Du kjøper` skal visuelt ligge nederst i `typesContainer`, ikke i headeren. Dette matcher `kjopsmodal-design.html` og reduserer høyden på popupen.
+
+Kontrakt:
+- `summaryEl` appendes som siste child i `typesContainer` etter ticket-radene.
+- `summaryEl` bruker `grid-column: 1 / -1`, `border-top`, `padding-top: 10px`.
+- `summaryEl` skjules helt når ingen tickets er valgt.
+- `header.children[2]` er kun en skjult compat-placeholder; ikke render synlig summary der.
 
 ### Primær Kjøp-knapp
 
@@ -216,12 +229,6 @@ Disse 4 test-filer beskytter komponenten:
 
 Per Tobias-direktiv 2026-05-15: **ikke skriv NYE tester** denne PR-en. Endringer som bryter eksisterende tester MÅ oppdatere testen (ikke regresjon, men bevisst designendring).
 
-## Designsider for iterasjon
-
-| Side | Path | Hva |
-|---|---|---|
-| Kjøpsmodal-mockup | `packages/game-client/src/kjopsmodal-design/kjopsmodal-design.html` | Tobias-bekreftet 2026-05-15 design (bundlet React/JSX) |
-
 ## Iterasjon 2 (2026-05-15 ettermiddag) — pixel-perfect mot mockup
 
 Etter PR #1502 (initial implementasjon) rapporterte Tobias at design ikke matchet mockup pixel-perfect. Følgende justeringer er gjort:
@@ -267,6 +274,28 @@ DOM-rekkefølgen er fortsatt test-locked (children[0]=header, [1]=typesContainer
 - Spill 2/3 PlayScreen-konsumenter uberørt
 - Letter-spacing 0.14em (subtitle) og 0.12em (premietabell-header) uendret — `displayName.test.ts` finner fortsatt subtitle korrekt
 
+## Iterasjon 3 (2026-05-16 kveld) — prod-popup lik mockup uten intern scroll
+
+Tobias sammenlignet prod-popupen (venstre) mot `kjopsmodal-design.html` (høyre) og pekte på tre avvik:
+
+1. Headeren sto på to linjer i prod, men én linje i mockup.
+2. `Du kjøper` lå i headeren i prod, men nederst i ticket-wrapperen i mockup.
+3. Prod-popupen var for høy i game-containeren og krevde scroll.
+
+Løsning:
+- Synlig header er `Neste spill: {displayName}` i én linje.
+- Subtitle-div med `letter-spacing: 0.14em` er beholdt som skjult test-anchor.
+- `summaryEl` flyttes visuelt til `typesContainer` som full-width footer.
+- `typesContainer` eier felles bordered wrapper rundt alle ticket-rader + summary.
+- `statusMsg` har `display:none` når tom, så tom status ikke bruker høyde.
+- Card-padding og premie/ticket-spacing er komprimert for live game-container.
+- Visual-harness `buy-popup` bruker nå 6-raders hvit/gul/lilla fixture med forhåndsvalgt `1x Liten hvit`, `1x Stor hvit`, `1x Liten gul`.
+
+Verifikasjon:
+- `npm -w @spillorama/game-client run test -- Game1BuyPopup` → 32/32 passer.
+- `npm -w @spillorama/game-client run check` → passer.
+- Visual-harness no-scroll-måling: `card.scrollHeight === card.clientHeight` og card passer innen overlay.
+
 ## Designsider for iterasjon
 
 | Side | Path | Hva |
@@ -279,3 +308,4 @@ DOM-rekkefølgen er fortsatt test-locked (children[0]=header, [1]=typesContainer
 |---|---|
 | 2026-05-15 | Initial v1.0.0 — Game1BuyPopup oppdatert til kjopsmodal-design.html mockup. Premietabell lagt til som card.children[2]. Subtitle beholdt som `<div>` med letter-spacing 0.14em for test-kompatibilitet. PrizeMatrix-header bruker 0.12em for å unngå falsk uniqueness-match. Auto-multiplikator-formel speilet fra `SPILL_REGLER_OG_PAYOUT.md §3.1`. Grønn primær-knapp (matcher mockup `#10b981 → #047857`-gradient). Spill 2 `BongCard.ts` er uberørt — kun Spill 1's `Game1BuyPopup.ts` (delt med Spill 2/3 PlayScreen). |
 | 2026-05-15 (iter2) | v1.0.1 — pixel-perfect iterasjon mot mockup. Card endret til flex-column med eksplisitt `order:` per child, slik at premietabell rendres VISUELT mellom header og ticket-rows (DOM-index 2 bevart for tests). Tightere spacing-verdier: typesContainer.rowGap 16→10px, columnGap 65→24px. 1px-divider flyttet fra sep.background til totalRow.borderTop (renere CSS-modell). PrizeMatrix-header venstrejustert. 32/32 tester passer. |
+| 2026-05-16 (iter3) | v1.1.0 — prod-popup justert mot Tobias-screenshot: énlinje-header, skjult subtitle test-anchor, `Du kjøper` nederst i bordered ticket-wrapper, tom status skjult, compact no-scroll layout. Visual-harness fixture oppdatert til 6-raders hvit/gul/lilla case. |

@@ -248,32 +248,47 @@ async function runIdle(): Promise<void> {
 async function runBuyPopup(): Promise<void> {
   const { overlay } = await setupBaseLayout();
   const popup = new Game1BuyPopup(overlay);
-  popup.showWithTypes(50, [
+  popup.showWithTypes(5, [
     {
-      name: "Yellow",
-      type: "standard",
+      name: "Small White",
+      type: "small",
       priceMultiplier: 1,
+      ticketCount: 1,
+    },
+    {
+      name: "Large White",
+      type: "large",
+      priceMultiplier: 3,
       ticketCount: 3,
     },
     {
-      name: "Purple",
-      type: "standard",
+      name: "Small Yellow",
+      type: "small",
       priceMultiplier: 2,
-      ticketCount: 6,
+      ticketCount: 1,
     },
     {
-      name: "Red",
-      type: "elvis",
+      name: "Large Yellow",
+      type: "large",
+      priceMultiplier: 6,
+      ticketCount: 3,
+    },
+    {
+      name: "Small Purple",
+      type: "small",
       priceMultiplier: 3,
-      ticketCount: 9,
+      ticketCount: 1,
     },
     {
-      name: "Green",
-      type: "traffic-light",
-      priceMultiplier: 4,
-      ticketCount: 12,
+      name: "Large Purple",
+      type: "large",
+      priceMultiplier: 9,
+      ticketCount: 3,
     },
   ]);
+  for (const slug of ["small-white", "large-white", "small-yellow"]) {
+    document.querySelector<HTMLButtonElement>(`[data-test="buy-popup-plus-${slug}"]`)?.click();
+  }
   // Popup + backdrop-filter stack takes a couple of frames to paint; 300ms
   // is well past that boundary on every target runner we've tested on.
   requestAnimationFrame(() => setTimeout(markReady, 300));

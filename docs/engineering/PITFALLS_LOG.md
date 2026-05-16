@@ -50,14 +50,14 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§4 Live-rom-state](#4-live-rom-state) | 7 | 2026-05-10 |
 | [§5 Git & PR-flyt](#5-git--pr-flyt) | 16 | 2026-05-15 |
 | [§6 Test-infrastruktur](#6-test-infrastruktur) | 18 | 2026-05-15 |
-| [§7 Frontend / Game-client](#7-frontend--game-client) | 31 | 2026-05-16 |
+| [§7 Frontend / Game-client](#7-frontend--game-client) | 32 | 2026-05-16 |
 | [§8 Doc-disiplin](#8-doc-disiplin) | 8 | 2026-05-15 |
 | [§9 Konfigurasjon / Environment](#9-konfigurasjon--environment) | 9 | 2026-05-13 |
 | [§10 Routing & Permissions](#10-routing--permissions) | 3 | 2026-05-10 |
 | [§11 Agent-orkestrering](#11-agent-orkestrering) | 20 | 2026-05-15 |
 | [§12 DB-resilience](#12-db-resilience) | 1 | 2026-05-14 |
 
-**Total:** 117 entries (per 2026-05-16)
+**Total:** 118 entries (per 2026-05-16)
 
 ---
 
@@ -3279,6 +3279,59 @@ norske labels.
 
 ---
 
+### §7.38 — BuyPopup-design må løse DOM-test-kontrakt og visuell mockup separat
+
+**Severity:** P2 (frontend-regresjon / kjøpsflyt-UX)
+**Oppdaget:** 2026-05-16 (Tobias-screenshot: prod-popup til venstre, `kjopsmodal-design.html` til høyre)
+**Status:** LØST 2026-05-16
+
+**Symptom:**
+Prod-`Game1BuyPopup` hadde samme funksjonelle innhold som mockupen, men avvek
+visuelt: headeren sto på to linjer, `Du kjøper` lå øverst i headeren,
+ticket-radene manglet felles bordered wrapper, og popupen ble høy nok til at
+spilleren måtte scrolle i live-spill.
+
+**Root cause:**
+`Game1BuyPopup` har test-låste DOM-indekser fra tidligere iterasjoner:
+`card.children[1] = typesContainer`, `[2] = prizeMatrixEl`, `[3] = statusMsg`,
+`[5] = buyBtn`, `[6] = cancelBtn`; i tillegg forventer lossState-testen
+`header.children[3] = lossStateEl`, og displayName-testen finner subtitle via
+`letter-spacing: 0.14em`. Tidligere implementasjon prøvde å beholde disse
+indeksene ved å legge `summaryEl` i headeren, men det ga feil visuell layout og
+for høy popup.
+
+**Fix:**
+- Synlig header er nå én linje: `Neste spill: {displayName}`.
+- Subtitle-diven med `letter-spacing: 0.14em` beholdes kun som skjult test-
+  kompatibilitetsanker.
+- `header.children[2]` er en skjult compat-placeholder, slik at `lossStateEl`
+  fortsatt er `header.children[3]`.
+- Den faktiske `Du kjøper`-summaryen rendres nederst i `typesContainer`, med
+  full bredde (`grid-column: 1 / -1`) og divider-linje som i mockupen.
+- `typesContainer` eier nå den felles bordered ticket-wrapperen.
+- `statusMsg` skjules når tom, og kort-padding/spacing er strammet slik at
+  popupen passer uten intern scroll på desktop/tablet.
+- Visual-harness `buy-popup` bruker nå 6-raders hvit/gul/lilla-fixture med
+  forhåndsvalgt `1x Liten hvit`, `1x Stor hvit`, `1x Liten gul`.
+
+**Prevention:**
+- Ikke flytt top-level card-children for å matche design. Bruk CSS `order`,
+  skjulte compat-ankere eller wrapper-styling når test-kontrakten må beholdes.
+- Ikke legg `Du kjøper` i headeren. Summary hører visuelt til nederst i
+  ticket-wrapperen under type-radene.
+- BuyPopup-endringer skal alltid sjekkes mot både `kjopsmodal-design.html` og
+  visual-harness `?scenario=buy-popup`, med eksplisitt no-scroll-måling av
+  `card.scrollHeight <= card.clientHeight`.
+
+**Filer endret:**
+- `packages/game-client/src/games/game1/components/Game1BuyPopup.ts`
+- `packages/game-client/src/visual-harness/visual-harness.ts`
+- `.claude/skills/buy-popup-design/SKILL.md`
+
+**Related:** Skill `buy-popup-design` v1.1.0
+
+---
+
 ## §8 Doc-disiplin
 
 ### §8.1 — BACKLOG.md går stale uten review
@@ -4111,3 +4164,4 @@ Lim hele kontrakten inn i agent-prompten.
 | 2026-05-16 | Lagt til §11.23 — live-test må ha frozen Sentry/PostHog snapshot før/etter, ellers blir agent-evidence muntlig og ureviderbar. Ny `npm run observability:snapshot`. | PM-AI (observability snapshot runner) |
 | 2026-05-16 | Lagt til §11.24 — PM self-test fritekst-svar uten konkret pack-anker. Fase 3 P3-follow-up av ADR-0024: per-spørsmål-heuristikk i `scripts/pm-knowledge-continuity.mjs` med 12 konkrete anker-regex + fluff-reject + `[self-test-bypass:]`-marker. 55 tester. Etablerer meta-pattern (paraphrase-validation med per-felt-anker) — nå brukt i 3 gates. Ny doc: `docs/engineering/PM_SELF_TEST_HEURISTICS.md`. | PM-AI (Fase 3 P3 — self-test heuristikk) |
 | 2026-05-16 | Lagt til §9.10 — Render External Database URL er full-access, ikke read-only. Opprettet `spillorama_pm_readonly` og koblet observability-runner til `postgres-readonly.env`. | PM-AI (DB observability read-only role) |
+| 2026-05-16 | Lagt til §7.38 — BuyPopup-design må separere test-låst DOM-kontrakt fra visuell mockup. Header én linje, `Du kjøper` nederst i ticket-wrapper, no-scroll-verifisering i visual-harness. Total 117→118 entries. | PM-AI (BuyPopup design parity) |
