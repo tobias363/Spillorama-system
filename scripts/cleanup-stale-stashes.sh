@@ -256,8 +256,11 @@ echo "${C_BOLD}Apply mode${C_RESET} — about to drop ${ELIGIBLE_COUNT} stash(es
 
 # When dropping stashes, indices shift. Drop from highest to lowest.
 # Sort eligible indices descending by parsing stash@{N}.
+# bash 3.2 compatible (macOS default): no `mapfile` — use while-read instead.
 declare -a SORTED_IDX=()
-mapfile -t SORTED_IDX < <(
+while IFS= read -r idx_line; do
+  [ -n "$idx_line" ] && SORTED_IDX+=("$idx_line")
+done < <(
   for i in "${ELIGIBLE_IDX[@]}"; do
     ref="${STASH_REFS[$i]}"
     n="${ref#stash@\{}"
