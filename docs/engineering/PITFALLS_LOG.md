@@ -54,10 +54,10 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§8 Doc-disiplin](#8-doc-disiplin) | 8 | 2026-05-15 |
 | [§9 Konfigurasjon / Environment](#9-konfigurasjon--environment) | 10 | 2026-05-16 |
 | [§10 Routing & Permissions](#10-routing--permissions) | 3 | 2026-05-10 |
-| [§11 Agent-orkestrering](#11-agent-orkestrering) | 26 | 2026-05-17 |
+| [§11 Agent-orkestrering](#11-agent-orkestrering) | 27 | 2026-05-17 |
 | [§12 DB-resilience](#12-db-resilience) | 1 | 2026-05-14 |
 
-**Total:** 186 entries (per 2026-05-17)
+**Total:** 187 entries (per 2026-05-17)
 
 ---
 
@@ -4180,6 +4180,50 @@ Hver fix-PR auto-deleter sin branch på origin men ikke lokal worktree. Hver gan
 
 ---
 
+### §11.27 — Lokale og remote branches akkumulerer (1 476 lokale + 999 remote uten cleanup)
+
+**Severity:** P3 (operasjonell hygiene, ikke prod-risiko; treffer `git branch`/`git checkout` søk + GitHub branch-dropdown UX)
+**Oppdaget:** 2026-05-17 (audit etter Fase B-cleanup av worktrees+stashes)
+**Symptom:** Etter ~6 uker prosjekt har repo akkumulert:
+- 1 476 lokale branches (392 i aktive worktrees, ~1 084 ledige)
+- 999 remote branches på origin (8 har åpen PR, resten skulle vært ryddet)
+- `git branch --merged origin/main` finner kun 4 av 999 remote-branches som "merget" — squash-merge edge case ramme her: `gh pr list --state merged --search "head:<branch>"` er autoritativ kilde.
+
+`git branch` blir tregt og uoversiktlig, autocomplete-listings overfylles, GitHub branch-dropdown blir uleselig. Hver PR-merge auto-deleter remote-branch via `--delete-branch`, men lokale arbeids-branches består.
+
+**Root cause:**
+- Lokal `git branch` slettes ikke automatisk når remote-branch slettes via PR-merge.
+- Squash-merge bryter `git merge-base --is-ancestor` (commit-SHA differ), så `--merged` finner ikke disse branchene.
+- Worktrees holder branches "låst" — even etter Fase B-cleanup beholdes 392 worktree-branches.
+- Ingen TTL/cleanup-rutine på lokale OR remote branches.
+
+**Fix:**
+- Ny `scripts/cleanup-merged-branches.sh` (Fase B.2 av ADR-0024 follow-up).
+- Klassifiserer per branch: `MERGED` (ancestor av origin/main), `SQUASH-MERGED` (matcher merged-PR head fra gh-cache), `FRESH` (< --min-age dager), `OPEN-PR` (har åpen PR — beholdes), `WORKTREE` (checked out — beholdes), `CURRENT`, `PROTECTED` (main/master/backup/recovery/restore/rescue — aldri), `UNMERGED` (manuell vurdering).
+- DRY-RUN BY DEFAULT. `--apply` for interaktiv per-item Y/N. `--yes` for batch.
+- `--remote` for origin-branches (bruker `git push origin --delete`). `--all` for begge scopes.
+- `--json` for maskinlesbar output.
+- Bash 3.2-kompatibel (no `mapfile`, no `declare -A`) — basert på lærdom fra Fase B fix-up.
+
+**Empirisk verifisert mot faktisk repo-state 2026-05-17 (DRY-RUN):**
+- Lokale branches: 1 331 scannet → 532 SQUASH-MERGED trygt slettbare + 271 FRESH + 391 WORKTREE + 2 OPEN-PR + 13 PROTECTED + 1 CURRENT + 121 UNMERGED.
+- Remote branches: 916 scannet → 4 MERGED + 804 SQUASH-MERGED trygt slettbare + 16 FRESH + 8 OPEN-PR + 7 PROTECTED + 77 UNMERGED.
+- Grand total eligible: 532 + 808 = **1 340 branches trygt slettbare**.
+
+**Prevention:**
+- Kjør cleanup-script ved sesjons-slutt (Trinn 10 i PM_SESSION_END_CHECKLIST).
+- For squash-merge-edge-case: alltid bruk `gh pr list --state merged` som kilde, ikke `git merge-base --is-ancestor` alene.
+- Per-merge: vurder å auto-delete LOKAL branch også når PR merges (via post-merge hook — out-of-scope for denne PR).
+- Bash 3.2-kompatibilitet håndheves: ingen `mapfile`, ingen `declare -A`, test med `bash -n` + `--apply` på stub.
+
+**Related:**
+- §11.26 — Fase B (worktrees+stashes)
+- `scripts/cleanup-merged-branches.sh` (ny — Fase B.2)
+- `docs/operations/PM_SESSION_END_CHECKLIST.md` Trinn 10 (utvidet)
+- `.claude/skills/pm-orchestration-pattern/SKILL.md` v1.9.0
+
+---
+
 ## §12 DB-resilience
 
 ### §12.1 — pg-pool uten error-handler → 57P01 krasjer backend (Sentry SPILLORAMA-BACKEND-5)
@@ -4307,3 +4351,4 @@ Hver fix-PR auto-deleter sin branch på origin men ikke lokal worktree. Hver gan
 | 2026-05-16 | Lagt til §9.10 — Render External Database URL er full-access, ikke read-only. Opprettet `spillorama_pm_readonly` og koblet observability-runner til `postgres-readonly.env`. | PM-AI (DB observability read-only role) |
 | 2026-05-16 | Lagt til §7.38 — BuyPopup-design må separere test-låst DOM-kontrakt fra visuell mockup. Header én linje, `Du kjøper` nederst i ticket-wrapper, no-scroll-verifisering i visual-harness. Total 117→118 entries. | PM-AI (BuyPopup design parity) |
 | 2026-05-16 | Lagt til §7.39 — Ticket-grid top-gap må måles fra faktisk top-HUD, ikke hardkodes. `PlayScreen` plasserer nå bongene `16px` under målt `top-group-wrapper`-bunn og reposerer etter status/endring. Total 118→119 entries. | PM-AI (Spill 1 bong vertical spacing) |
+| 2026-05-17 | Lagt til §11.27 — Branch baggage akkumulerer (1 476 lokale + 999 remote uten cleanup). Fase B.2 av ADR-0024 follow-up: `cleanup-merged-branches.sh` med klassifisering (MERGED/SQUASH-MERGED/FRESH/OPEN-PR/WORKTREE/CURRENT/PROTECTED/UNMERGED). Bruker `gh pr list --state merged` for squash-merge-edge-case. DRY-RUN BY DEFAULT, `--apply` for interaktiv, `--remote`/`--all` for scope. Empirisk DRY-RUN: 1 340 branches trygt slettbare (532 lokale + 808 remote). Total 186→187 entries (§11 26→27). | PM-AI (Fase B.2 — cleanup-merged-branches) |
