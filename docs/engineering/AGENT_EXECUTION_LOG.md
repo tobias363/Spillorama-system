@@ -5218,3 +5218,58 @@ Trygt slettbart UTEN data-tap: 2 + 5 + 240 worktrees + 52 stashes (kategorisk + 
 - Nåværende GoH 4x80 hovedflyt er grønn under lokal observability med Sentry/PostHog/DB/pilot-monitor aktiv.
 - Neste robusthetsnivå bør være målrettet chaos/reconnect og wallet/payout reconciliation, ikke enda en identisk happy-path-rerun.
 - Evidence-filer er del av produktet: en CLI-argument-felle i test-runneren er en reell fallgruve fordi den kan svekke audit-sporet selv når produktflyten er grønn.
+
+### 2026-05-17 — PM-AI/Claude: Redis room-state-persistens hardening (P0-1 fra ekstern-konsulent-plan)
+
+**Agent-type:** PM/self-implementation (ekstern-konsulent-rolle)
+**Branch:** `claude/naughty-ride-0807dd`
+**Worktree:** `/Users/tobiashaugen/Projects/Spillorama-system/.claude/worktrees/naughty-ride-0807dd`
+**Scope:** Tobias spurte for ekstern-konsulent-vurdering av tidligere agent-analyse av Spill 1 live-rom-arkitektur. Etter verifikasjon var hovedfunnet at `SerializedRoomState`/`SerializedGameState` (apps/backend/src/store/RoomStateStore.ts) droppet kritiske felter som scheduledGameId, isHallShared, isTestHall, pendingMiniGame (RoomState) + spill3PhaseState, isPaused/pause-felter, participatingPlayerIds, patterns/patternResults, miniGame/jackpot, isTestGame (GameState). På Redis-restart gikk disse tapt selv om `markRoomAsScheduledAndPersist` await-et persist — kommentaren på `RedisRoomStateStore.ts:96-99` antydet allerede gapet. Plan-fil: `/Users/tobiashaugen/.claude/plans/kort-konklusjon-arkitekturen-for-crispy-pretzel.md` P0-1.
+
+**Kodeendringer:**
+- `apps/backend/src/store/RoomStateStore.ts`:
+  - `SerializedRoomState` utvidet med optional `scheduledGameId`, `isHallShared`, `isTestHall`, `pendingMiniGame`.
+  - `SerializedGameState` utvidet med optional `patterns`, `patternResults`, `participatingPlayerIds`, `jackpot`, `miniGame`, `isPaused`, `pauseMessage`, `pauseUntil`, `pauseReason`, `isTestGame`, `spill3PhaseState`.
+  - `serializeRoom`/`serializeGame` bruker `if (room.X !== undefined)`-mønster så payload ikke blir blåst opp med undefined-keys.
+  - `deserializeRoom`/`deserializeGame` lar `undefined` passere uendret — pre-hardening Redis-snapshots forblir bakoverkompatible.
+  - `spill3PhaseState` deep-clones (matches `BingoEngine.serializeGame`-mønsteret) for å unngå referanse-deling mellom in-memory og persistert payload.
+- `apps/backend/src/store/RoomStateStore.test.ts`: 10 nye regresjons-tester:
+  - Per-felt round-trip-tester for scheduledGameId, isHallShared, isTestHall, pendingMiniGame.
+  - "ALLE kritiske felter samtidig" (scheduled GoH-demo-rom).
+  - "pre-hardening Redis-snapshot bakoverkompatibel" (verifiserer at gamle payloads uten de nye feltene deserialiseres uten å introdusere uønskede defaults).
+  - "rom UTEN optional felter emitter ikke undefined-keys" (forhindrer payload-bloat).
+  - GameState-tester for spill3PhaseState (R10), pause-state (BIN-460/MED-11), participatingPlayerIds (KRITISK-8) + isTestGame (BIN-463).
+
+**Tester kjørt:**
+- `LOG_LEVEL=warn npx --prefix apps/backend tsx --test apps/backend/src/store/RoomStateStore.test.ts` — 13/13 pass.
+- `LOG_LEVEL=warn npx --prefix apps/backend tsx --test apps/backend/src/store/RedisRoomStateStore.setAndPersist.test.ts` — 12/12 pass (eksisterende Redis-tester urørt).
+- `npm --prefix apps/backend run check` — typecheck clean.
+- `LOG_LEVEL=warn npm --prefix apps/backend run test` — 11471 pass, 0 fail, 140 skipped, 1 todo.
+
+**Pre-flight pre-test:**
+- `npm --prefix apps/backend install` (F1 — backend-deps mangler etter rebase).
+- `npm run build:types` (F2 — shared-types må bygges før backend kan importere).
+
+**Dokumentasjon oppdatert:**
+- `.claude/skills/live-room-robusthet-mandate/SKILL.md` v1.4.0 — ny seksjon "Redis room-state-serialisering — INVARIANT" med tabell over hvilke felter som MÅ persisteres + hvorfor, og PR-pattern for fremtidige felter.
+- `docs/engineering/PITFALLS_LOG.md` §4.10 — fullstendig forklaring av bugen + alle 8 konsekvenser ved restart + fix-detaljer + prevention-pattern.
+
+**Coordination block (worktree-routine 2026-05-17):**
+- Fresh-main sync: fetched origin/main + rebased at 755b57157 før første filendring.
+- Branch lane: claude.
+- Worktree: ephemeral `.claude/worktrees/naughty-ride-0807dd` (eksplisitt direktiv fra Tobias).
+- Shared files touched: `docs/engineering/PITFALLS_LOG.md` (append-only §4.10 + indeks-tellere), `docs/engineering/AGENT_EXECUTION_LOG.md` (denne entry), `.claude/skills/live-room-robusthet-mandate/SKILL.md` (skill-doc-protokoll per Tobias-direktiv 2026-05-14 §2.19).
+- Coordination note: Sjekket åpne PRs før touching shared files — ingen Codex-PR overlapper med disse filene. PR #1565 (claude) og #1561 (claude) er begge utenfor live-rom-state scope.
+
+**Læring:**
+- Når en `setAndPersist`-funksjon await-er og returnerer success, er det IKKE bevis på at hele state er bevart — sjekk serializer-funksjonen. JSDoc-kommentarer som antyder "no checkpoint backing" er nyttige som leads, men ikke som bevis.
+- Append-only tester (per felt + "alle samtidig") gjør det enklere å fange manglende felt i fremtidige PR-er. Bruk dem som template.
+- Backward-compat-test for pre-hardening payload er like viktig som forward-tester — uten den kunne deserialiseringen feilaktig "default-ut" verdier og endre adferd for rom som finnes i Redis fra før.
+- Skill-doc invariant-seksjon er mer effektiv som regresjons-vakt enn å bare legge tester — fremtidige agenter som rør types.ts ser direktivet i samme skill som styrer live-rom-arbeidet.
+
+**Neste steg fra plan:**
+- P0-2: Klient-side `LiveRoomRecoverySupervisor` (separat PR).
+- P0-3: PlayScreen `loadingTransitionDeadline` ekte setTimeout (separat PR).
+- P0-4: `publicGameHealth.deriveStatus` tar `mismatchStatus` (separat PR).
+- P0-5: `LobbyStateBinding.fetchOnce` AbortController med 5s timeout (separat PR).
+- P0-6: GoH 4x80 rerun med invariant-verifikasjon for V2 (Redis-roundtrip).

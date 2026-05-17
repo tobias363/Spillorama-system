@@ -47,7 +47,7 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§1 Compliance & Regulatorisk](#1-compliance--regulatorisk) | 9 | 2026-05-10 |
 | [§2 Wallet & Pengeflyt](#2-wallet--pengeflyt) | 11 | 2026-05-14 |
 | [§3 Spill 1, 2, 3 arkitektur](#3-spill-1-2-3-arkitektur) | 19 | 2026-05-15 |
-| [§4 Live-rom-state](#4-live-rom-state) | 11 | 2026-05-17 |
+| [§4 Live-rom-state](#4-live-rom-state) | 12 | 2026-05-17 |
 | [§5 Git & PR-flyt](#5-git--pr-flyt) | 16 | 2026-05-15 |
 | [§6 Test-infrastruktur](#6-test-infrastruktur) | 25 | 2026-05-17 |
 | [§7 Frontend / Game-client](#7-frontend--game-client) | 47 | 2026-05-16 |
@@ -57,7 +57,7 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§11 Agent-orkestrering](#11-agent-orkestrering) | 26 | 2026-05-17 |
 | [§12 DB-resilience](#12-db-resilience) | 1 | 2026-05-14 |
 
-**Total:** 187 entries (per 2026-05-17)
+**Total:** 188 entries (per 2026-05-17)
 
 ---
 
@@ -1149,6 +1149,52 @@ WHERE id = $1
 - `docs/evidence/20260517-goh-full-plan-rerun-4x80-postfix/goh-full-plan-rerun-4x80-postfix-20260517T1033.json`
 - `docs/evidence/20260517-goh-full-plan-rerun-4x80-markretry/goh-full-plan-rerun-4x80-markretry-20260517T142023.summary.json`
 - `docs/operations/GOH_FULL_PLAN_4X80_RERUN_RESULT_2026-05-17.md`
+
+### §4.10 — `SerializedRoomState` droppet live-room-felter — scheduledGameId/isHallShared/isTestHall/pendingMiniGame gikk tapt ved Redis-restart
+
+**Severity:** P0 (pilot-blokker — regulatorisk og UX)
+**Oppdaget:** 2026-05-17 (ekstern-konsulent-review av Spill 1 live-rom-arkitektur)
+**Status:** LØST 2026-05-17
+**Symptom:** RoomState i `apps/backend/src/game/types.ts` har feltene `scheduledGameId`, `isHallShared`, `isTestHall`, `pendingMiniGame`. `BingoEngine.markRoomAsScheduledAndPersist` kaller `setAndPersistWithPath` som await-er `serializeRoom` → `JSON.stringify` → `Redis.setex`. Det LIGNER på at persist er trygt — men `SerializedRoomState` (`apps/backend/src/store/RoomStateStore.ts:37-51`) hadde KUN 8 felter og emittet ikke disse. Tilsvarende for `SerializedGameState` som droppet `spill3PhaseState`, `isPaused`/pause-felter, `participatingPlayerIds`, `patterns`/`patternResults`, `miniGame`/`jackpot`, `isTestGame`.
+
+**Kommentaren på `RedisRoomStateStore.ts:96-99` antydet allerede at scheduledGameId/isHallShared/gameSlug ikke har checkpoint-backing**, men koden gjorde det aldri.
+
+**Konsekvenser ved Redis-restart eller cross-instance failover:**
+
+- **scheduledGameId mistet:** scheduled Spill 1-rom hadde bindingen til `app_game1_scheduled_games` kun i in-memory. Restart → `room:resume`/`room:state`-validering mot scheduledGameId feilet → spillere kunne ikke reconnecte uten `window.location.reload()`.
+- **isHallShared mistet:** GoH-rom (per-link Spill 1, global Spill 2/3) mistet shared-flagget → `BingoEngine.joinRoom` aktiverte HALL_MISMATCH-sjekken som skal være relaksert for shared rom → spillere fra ikke-master-haller ble kastet ut.
+- **isTestHall mistet:** Demo-haller (`isTestHall=true`) mistet test-flagget → pattern-evaluator endte runden på Fullt Hus i stedet for å gå gjennom alle 5 faser. Prod-end-on-bingo-oppførsel trådte inn for haller som skulle vært test-modus.
+- **pendingMiniGame mistet:** Uspilt mini-game (skulle overleve `archiveIfEnded`-wipe) forsvant → Tobias prod-incident 2026-04-30 ville reaktiveres.
+- **spill3PhaseState mistet:** Spill 3 sequential phase-state (R10) gikk tapt → runden re-startet fra Rad 1 etter recovery i stedet for fra current phase.
+- **isPaused / pauseUntil / pauseReason mistet:** Master-pauset spill ville auto-resume etter restart fordi pause-flagget ikke overlevde.
+- **participatingPlayerIds mistet (KRITISK-8):** Payout-binding og compliance-ledger trenger denne for å vite hvem som var med i runden.
+- **isTestGame mistet (BIN-463):** Test-runde kunne plutselig debite ekte wallets etter restart.
+
+**Root cause:** `serializeRoom`/`serializeGame`/`deserializeRoom`/`deserializeGame` ble skrevet før mange av disse RoomState/GameState-feltene ble introdusert. Hver gang nye felter ble lagt til i types.ts ble serializer-en glemt. Ingen test fanget det fordi tests dekket bare round-trip av de allerede-serialiserte feltene.
+
+**Fix (2026-05-17):**
+
+- `SerializedRoomState` utvidet med optional `scheduledGameId`, `isHallShared`, `isTestHall`, `pendingMiniGame`.
+- `SerializedGameState` utvidet med optional `patterns`, `patternResults`, `participatingPlayerIds`, `jackpot`, `miniGame`, `isPaused`, `pauseMessage`, `pauseUntil`, `pauseReason`, `isTestGame`, `spill3PhaseState`.
+- `serializeRoom`/`serializeGame` emitter optional felter KUN når satt (`if (room.X !== undefined)`-mønster) for å holde Redis-payload kompakt.
+- `deserializeRoom`/`deserializeGame` lar `undefined` passere uendret — pre-hardening Redis-snapshots forblir bakoverkompatible (ingen default-verdier som endrer adferd).
+- 10 regresjons-tester i `apps/backend/src/store/RoomStateStore.test.ts`, inkludert pre-hardening backward-compat-test som verifiserer at gamle Redis-payloads fortsatt deserialiseres uten å introdusere uønskede defaults.
+
+**Prevention (skill-doc invariant):**
+
+`.claude/skills/live-room-robusthet-mandate/SKILL.md` (v1.4.0) har ny seksjon "Redis room-state-serialisering — INVARIANT" som krever at hvert nytt RoomState/GameState-felt enten persisteres eksplisitt eller har JSDoc-kommentar som forklarer hvorfor det ikke er persistert. Tabell over hvilke felter som MÅ persisteres + hvorfor.
+
+**PR-pattern for fremtidige felter:** Når du legger til et felt i types.ts som beskriver live-room-state (ikke ren UI-state), oppdater `SerializedRoomState`/`SerializedGameState` + `serializeRoom`/`serializeGame` + tester i SAMME PR. Bruk eksisterende "ALLE kritiske felter samtidig"-test som template.
+
+**Related:**
+
+- `apps/backend/src/store/RoomStateStore.ts:37-81` — serializer/deserializer
+- `apps/backend/src/store/RoomStateStore.test.ts` — 10 regresjons-tester
+- `apps/backend/src/store/RedisRoomStateStore.ts:96-99, 166-178` — kommentaren som antydet bugen + persist-pathen
+- `apps/backend/src/game/types.ts:336-402` — RoomState felt-definisjoner
+- `apps/backend/src/game/BingoEngine.ts:1006-1042` — markRoomAsScheduled* som setter feltet
+- `.claude/skills/live-room-robusthet-mandate/SKILL.md` v1.4.0 — invariant-seksjonen
+- Ekstern-konsulent-plan 2026-05-17 P0-1
 
 ---
 
