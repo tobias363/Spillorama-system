@@ -4,8 +4,8 @@
 > `.github/workflows/auto-generate-docs.yml` på hver push til main.
 >
 > Generator: `scripts/generate-architecture-docs.sh`
-> Sist oppdatert: 2026-05-15T21:21:10Z
-> Commit: `b772ccfd` (branch: `main`)
+> Sist oppdatert: 2026-05-17T17:48:12Z
+> Commit: `a40d4d2e` (branch: `main`)
 
 Liste over tabeller (og deres kolonner ved CREATE TABLE-tid) parset fra
 `apps/backend/migrations/*.sql`. Senere ALTER TABLE-uttrykk listes
