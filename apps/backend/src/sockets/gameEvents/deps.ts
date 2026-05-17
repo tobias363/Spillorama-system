@@ -287,5 +287,6 @@ export interface GameEventsDeps {
     roomCode: string;
     playerId: string;
     number: number;
+    scheduledGameId?: string;
   }) => Promise<boolean>;
 }

@@ -12,6 +12,7 @@ interface ServiceOptions {
 }
 
 interface GameMarkCache {
+  roomCode: string | null;
   status: string;
   drawnNumbers: Set<number>;
   playerTicketNumbersByWallet: Map<string, Set<number>>;
@@ -19,6 +20,7 @@ interface GameMarkCache {
 }
 
 interface ScheduledGameRow {
+  room_code: string | null;
   status: string;
   draw_bag_json: unknown | null;
   draws_completed: number | string | null;
@@ -55,9 +57,9 @@ function parseNumberArray(raw: unknown): number[] {
     .filter((value) => Number.isInteger(value) && value > 0);
 }
 
-function isMarkableStatus(status: string): boolean {
+function isMarkableStatus(status: string, allowCompleted: boolean): boolean {
   const normalized = status.toLowerCase();
-  return normalized === "running" || normalized === "paused";
+  return normalized === "running" || normalized === "paused" || (allowCompleted && normalized === "completed");
 }
 
 /**
@@ -66,9 +68,11 @@ function isMarkableStatus(status: string): boolean {
  * This intentionally does not hydrate `enrichScheduledGame1RoomSnapshot()`:
  * at GoH 4x80 scale each drawn ball can produce thousands of player marks,
  * and the full room snapshot loads every purchase/assignment. This service
- * uses the in-memory room binding to resolve scheduledGameId, then caches the
- * small immutable pieces needed for validation.
- */
+   * uses an explicit scheduledGameId when the client/runner echoes `draw:new.gameId`.
+   * That keeps late marks valid even after the canonical room has been reset for
+   * the next round. Legacy callers without scheduledGameId still fall back to
+   * the in-memory room binding.
+   */
 export class Game1ScheduledTicketMarkService {
   private readonly pool: QueryablePool;
   private readonly engine: BingoEngine;
@@ -87,9 +91,21 @@ export class Game1ScheduledTicketMarkService {
     roomCode: string;
     playerId: string;
     number: number;
+    scheduledGameId?: string;
   }): Promise<boolean> {
     const snapshot = this.engine.getRoomSnapshot(input.roomCode);
-    if (snapshot.gameSlug.toLowerCase() !== "bingo" || !snapshot.scheduledGameId) {
+    const explicitScheduledGameId = typeof input.scheduledGameId === "string" && input.scheduledGameId.trim().length > 0
+      ? input.scheduledGameId.trim()
+      : null;
+    if (snapshot.gameSlug.toLowerCase() !== "bingo") {
+      if (explicitScheduledGameId) {
+        throw new DomainError("GAME_MISMATCH", "Scheduled markering kan bare brukes for Spill 1.");
+      }
+      return false;
+    }
+
+    const scheduledGameId = explicitScheduledGameId ?? snapshot.scheduledGameId ?? null;
+    if (!scheduledGameId) {
       return false;
     }
 
@@ -98,16 +114,25 @@ export class Game1ScheduledTicketMarkService {
       throw new DomainError("PLAYER_NOT_FOUND", "Spiller finnes ikke i rommet.");
     }
 
-    const gameCache = await this.getGameCache(snapshot.scheduledGameId, false);
-    if (!gameCache || !isMarkableStatus(gameCache.status)) {
+    const allowCompletedAck = explicitScheduledGameId !== null;
+    const gameCache = await this.getGameCache(scheduledGameId, false);
+    if (!gameCache) {
+      if (explicitScheduledGameId) {
+        throw new DomainError("SCHEDULED_GAME_NOT_FOUND", "Fant ikke planlagt runde.");
+      }
+      throw new DomainError("GAME_NOT_RUNNING", "Ingen aktiv runde.");
+    }
+    this.assertRoomMatches(input.roomCode, gameCache);
+    if (!isMarkableStatus(gameCache.status, allowCompletedAck)) {
       throw new DomainError("GAME_NOT_RUNNING", "Ingen aktiv runde.");
     }
 
     let cacheForDraw = gameCache;
     if (!cacheForDraw.drawnNumbers.has(input.number)) {
-      cacheForDraw = await this.getGameCache(snapshot.scheduledGameId, true) ?? gameCache;
+      cacheForDraw = await this.getGameCache(scheduledGameId, true) ?? gameCache;
+      this.assertRoomMatches(input.roomCode, cacheForDraw);
     }
-    if (!isMarkableStatus(cacheForDraw.status)) {
+    if (!isMarkableStatus(cacheForDraw.status, allowCompletedAck)) {
       throw new DomainError("GAME_NOT_RUNNING", "Ingen aktiv runde.");
     }
     if (!cacheForDraw.drawnNumbers.has(input.number)) {
@@ -115,7 +140,7 @@ export class Game1ScheduledTicketMarkService {
     }
 
     const playerTicketNumbers = await this.getPlayerTicketNumbers(
-      snapshot.scheduledGameId,
+      scheduledGameId,
       player.walletId,
       cacheForDraw,
     );
@@ -127,6 +152,13 @@ export class Game1ScheduledTicketMarkService {
     }
 
     return true;
+  }
+
+  private assertRoomMatches(inputRoomCode: string, gameCache: GameMarkCache): void {
+    if (!gameCache.roomCode) return;
+    if (gameCache.roomCode.toUpperCase() !== inputRoomCode.toUpperCase()) {
+      throw new DomainError("SCHEDULED_GAME_ROOM_MISMATCH", "Runden tilhører et annet rom.");
+    }
   }
 
   private async getGameCache(
@@ -144,7 +176,7 @@ export class Game1ScheduledTicketMarkService {
     const draws = table(this.schema, "app_game1_draws");
 
     const { rows } = await this.pool.query<ScheduledGameRow>(
-      `SELECT sg.status, gs.draw_bag_json, gs.draws_completed
+      `SELECT sg.room_code, sg.status, gs.draw_bag_json, gs.draws_completed
          FROM ${scheduledGames} sg
          LEFT JOIN ${gameState} gs ON gs.scheduled_game_id = sg.id
         WHERE sg.id = $1
@@ -180,6 +212,7 @@ export class Game1ScheduledTicketMarkService {
     }
 
     const refreshed: GameMarkCache = {
+      roomCode: row.room_code,
       status: row.status,
       drawnNumbers,
       playerTicketNumbersByWallet: existing?.playerTicketNumbersByWallet ?? new Map(),

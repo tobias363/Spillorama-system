@@ -1,0 +1,590 @@
+{
+  "runId": "2026-05-17T10-02-26-743Z",
+  "startedAt": "2026-05-17T10:02:26.744Z",
+  "finishedAt": "2026-05-17T10:16:54.507Z",
+  "backendUrl": "http://localhost:4000",
+  "groupOfHallsId": "demo-pilot-goh",
+  "masterHallId": "demo-hall-001",
+  "halls": [
+    "demo-hall-001",
+    "demo-hall-002",
+    "demo-hall-003",
+    "demo-hall-004"
+  ],
+  "playersPerHall": 80,
+  "purchaseConcurrency": 8,
+  "purchaseRetries": 4,
+  "status": "failed",
+  "monitoring": {
+    "pilotMonitorLog": "/tmp/pilot-monitor.log",
+    "pilotMonitorSnapshot": "/tmp/pilot-monitor-snapshot.md",
+    "sentryAuthTokenPresent": false,
+    "posthogEnvPresent": false
+  },
+  "planItems": [
+    {
+      "position": 1,
+      "slug": "bingo",
+      "displayName": "Bingo",
+      "requiresJackpotSetup": false
+    },
+    {
+      "position": 2,
+      "slug": "1000-spill",
+      "displayName": "1000-spill",
+      "requiresJackpotSetup": false
+    },
+    {
+      "position": 3,
+      "slug": "5x500",
+      "displayName": "5×500",
+      "requiresJackpotSetup": false
+    },
+    {
+      "position": 4,
+      "slug": "ball-x-10",
+      "displayName": "Ball × 10",
+      "requiresJackpotSetup": false
+    },
+    {
+      "position": 5,
+      "slug": "bokstav",
+      "displayName": "Bokstav",
+      "requiresJackpotSetup": false
+    },
+    {
+      "position": 6,
+      "slug": "innsatsen",
+      "displayName": "Innsatsen",
+      "requiresJackpotSetup": false
+    },
+    {
+      "position": 7,
+      "slug": "jackpot",
+      "displayName": "Jackpot",
+      "requiresJackpotSetup": true
+    },
+    {
+      "position": 8,
+      "slug": "kvikkis",
+      "displayName": "Kvikkis",
+      "requiresJackpotSetup": false
+    },
+    {
+      "position": 9,
+      "slug": "oddsen-55",
+      "displayName": "Oddsen 55",
+      "requiresJackpotSetup": false
+    },
+    {
+      "position": 10,
+      "slug": "oddsen-56",
+      "displayName": "Oddsen 56",
+      "requiresJackpotSetup": false
+    },
+    {
+      "position": 11,
+      "slug": "oddsen-57",
+      "displayName": "Oddsen 57",
+      "requiresJackpotSetup": false
+    },
+    {
+      "position": 12,
+      "slug": "trafikklys",
+      "displayName": "Trafikklys",
+      "requiresJackpotSetup": false
+    },
+    {
+      "position": 13,
+      "slug": "tv-extra",
+      "displayName": "TV-Extra",
+      "requiresJackpotSetup": false
+    }
+  ],
+  "clients": {
+    "requested": 320,
+    "loaded": 320,
+    "connected": 320,
+    "connectionFailures": [],
+    "expectedTicketAssignmentsPerRound": 920
+  },
+  "reset": {
+    "recoverStale": {
+      "ok": true,
+      "cleared": {
+        "planRuns": 0,
+        "scheduledGames": 0
+      },
+      "details": {
+        "recoveredAt": "2026-05-17T10:02:26.810Z",
+        "todayBusinessDate": "2026-05-17",
+        "clearedPlanRuns": [],
+        "clearedScheduledGames": []
+      }
+    },
+    "cancelledScheduledGames": 4,
+    "planRunsReset": 0,
+    "businessDate": "2026-05-17",
+    "loadPlayerWalletsToppedUp": 320,
+    "loadPlayerWalletMinDepositNok": 100000,
+    "loadPlayerLossEntriesDeleted": 2887,
+    "loadPlayerPersonalLimitsDeleted": 0,
+    "loadPlayerPendingLimitsDeleted": 0,
+    "lossLimitResetNote": "DB-ledger reset for synthetic demo-load users only. Restart backend after reset if it already had old RG state hydrated in memory."
+  },
+  "rounds": [
+    {
+      "position": 1,
+      "slug": "bingo",
+      "displayName": "Bingo",
+      "scheduledGameId": "85b8b591-177c-4ca5-b5ac-af6bbaaccf8c",
+      "planRunId": "840908a6-2c65-4cbc-8829-656436ac70f8",
+      "purchaseOpenAt": "2026-05-17T10:14:12.956Z",
+      "roomCode": "BINGO_DEMO-PILOT-GOH",
+      "joins": {
+        "ok": 320,
+        "failed": []
+      },
+      "purchases": {
+        "ok": 320,
+        "failed": [],
+        "transientFailures": 2,
+        "retried": 2
+      },
+      "ready": {
+        "ok": 4,
+        "failed": [],
+        "demo-hall-001": {
+          "gameId": "85b8b591-177c-4ca5-b5ac-af6bbaaccf8c",
+          "hallId": "demo-hall-001",
+          "hallName": "Demo Bingohall 1 (Master)",
+          "isReady": true,
+          "readyAt": "2026-05-17T10:14:44.480Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": false
+        },
+        "demo-hall-002": {
+          "gameId": "85b8b591-177c-4ca5-b5ac-af6bbaaccf8c",
+          "hallId": "demo-hall-002",
+          "hallName": "Demo Bingohall 2",
+          "isReady": true,
+          "readyAt": "2026-05-17T10:14:44.489Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": false
+        },
+        "demo-hall-003": {
+          "gameId": "85b8b591-177c-4ca5-b5ac-af6bbaaccf8c",
+          "hallId": "demo-hall-003",
+          "hallName": "Demo Bingohall 3",
+          "isReady": true,
+          "readyAt": "2026-05-17T10:14:44.495Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": false
+        },
+        "demo-hall-004": {
+          "gameId": "85b8b591-177c-4ca5-b5ac-af6bbaaccf8c",
+          "hallId": "demo-hall-004",
+          "hallName": "Demo Bingohall 4",
+          "isReady": true,
+          "readyAt": "2026-05-17T10:14:44.501Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": true
+        }
+      },
+      "start": {
+        "scheduledGameId": "85b8b591-177c-4ca5-b5ac-af6bbaaccf8c",
+        "planRunId": "840908a6-2c65-4cbc-8829-656436ac70f8",
+        "status": "running",
+        "scheduledGameStatus": "running",
+        "inconsistencyWarnings": []
+      },
+      "terminalStatus": "completed",
+      "completedAt": "2026-05-17T10:15:59.758Z",
+      "durationMs": 75254,
+      "resumes": 4,
+      "summary": {
+        "purchases": 320,
+        "amountCents": 1280000,
+        "tickets": 920,
+        "draws": 61,
+        "winners": 7
+      },
+      "socketEventTotals": {
+        "drawEvents": 19459,
+        "markAcks": 0,
+        "markFailures": 12926,
+        "markSkipped": 6533,
+        "markFailureCodes": {
+          "GAME_NOT_RUNNING": 12926
+        },
+        "markFailureSamples": [
+          {
+            "email": "demo-load-h1-1@example.com",
+            "number": 12,
+            "code": "GAME_NOT_RUNNING",
+            "message": "Ingen aktiv runde i rommet."
+          },
+          {
+            "email": "demo-load-h1-1@example.com",
+            "number": 60,
+            "code": "GAME_NOT_RUNNING",
+            "message": "Ingen aktiv runde i rommet."
+          },
+          {
+            "email": "demo-load-h1-1@example.com",
+            "number": 66,
+            "code": "GAME_NOT_RUNNING",
+            "message": "Ingen aktiv runde i rommet."
+          },
+          {
+            "email": "demo-load-h1-2@example.com",
+            "number": 28,
+            "code": "GAME_NOT_RUNNING",
+            "message": "Ingen aktiv runde i rommet."
+          },
+          {
+            "email": "demo-load-h1-2@example.com",
+            "number": 3,
+            "code": "GAME_NOT_RUNNING",
+            "message": "Ingen aktiv runde i rommet."
+          },
+          {
+            "email": "demo-load-h1-2@example.com",
+            "number": 67,
+            "code": "GAME_NOT_RUNNING",
+            "message": "Ingen aktiv runde i rommet."
+          },
+          {
+            "email": "demo-load-h1-3@example.com",
+            "number": 28,
+            "code": "GAME_NOT_RUNNING",
+            "message": "Ingen aktiv runde i rommet."
+          },
+          {
+            "email": "demo-load-h1-3@example.com",
+            "number": 51,
+            "code": "GAME_NOT_RUNNING",
+            "message": "Ingen aktiv runde i rommet."
+          },
+          {
+            "email": "demo-load-h1-3@example.com",
+            "number": 44,
+            "code": "GAME_NOT_RUNNING",
+            "message": "Ingen aktiv runde i rommet."
+          },
+          {
+            "email": "demo-load-h1-4@example.com",
+            "number": 12,
+            "code": "GAME_NOT_RUNNING",
+            "message": "Ingen aktiv runde i rommet."
+          },
+          {
+            "email": "demo-load-h1-4@example.com",
+            "number": 14,
+            "code": "GAME_NOT_RUNNING",
+            "message": "Ingen aktiv runde i rommet."
+          },
+          {
+            "email": "demo-load-h1-4@example.com",
+            "number": 60,
+            "code": "GAME_NOT_RUNNING",
+            "message": "Ingen aktiv runde i rommet."
+          }
+        ]
+      },
+      "ticketNumberCoverage": {
+        "assignmentRows": 920,
+        "playersWithNumbers": 320
+      },
+      "markFailureCodes": {
+        "GAME_NOT_RUNNING": 12926
+      },
+      "markFailureSamples": [
+        {
+          "email": "demo-load-h1-1@example.com",
+          "number": 12,
+          "code": "GAME_NOT_RUNNING",
+          "message": "Ingen aktiv runde i rommet."
+        },
+        {
+          "email": "demo-load-h1-4@example.com",
+          "number": 12,
+          "code": "GAME_NOT_RUNNING",
+          "message": "Ingen aktiv runde i rommet."
+        },
+        {
+          "email": "demo-load-h1-8@example.com",
+          "number": 12,
+          "code": "GAME_NOT_RUNNING",
+          "message": "Ingen aktiv runde i rommet."
+        },
+        {
+          "email": "demo-load-h1-9@example.com",
+          "number": 12,
+          "code": "GAME_NOT_RUNNING",
+          "message": "Ingen aktiv runde i rommet."
+        },
+        {
+          "email": "demo-load-h1-28@example.com",
+          "number": 12,
+          "code": "GAME_NOT_RUNNING",
+          "message": "Ingen aktiv runde i rommet."
+        },
+        {
+          "email": "demo-load-h1-45@example.com",
+          "number": 12,
+          "code": "GAME_NOT_RUNNING",
+          "message": "Ingen aktiv runde i rommet."
+        },
+        {
+          "email": "demo-load-h1-46@example.com",
+          "number": 12,
+          "code": "GAME_NOT_RUNNING",
+          "message": "Ingen aktiv runde i rommet."
+        },
+        {
+          "email": "demo-load-h1-50@example.com",
+          "number": 12,
+          "code": "GAME_NOT_RUNNING",
+          "message": "Ingen aktiv runde i rommet."
+        },
+        {
+          "email": "demo-load-h1-54@example.com",
+          "number": 12,
+          "code": "GAME_NOT_RUNNING",
+          "message": "Ingen aktiv runde i rommet."
+        },
+        {
+          "email": "demo-load-h1-55@example.com",
+          "number": 12,
+          "code": "GAME_NOT_RUNNING",
+          "message": "Ingen aktiv runde i rommet."
+        },
+        {
+          "email": "demo-load-h1-56@example.com",
+          "number": 12,
+          "code": "GAME_NOT_RUNNING",
+          "message": "Ingen aktiv runde i rommet."
+        },
+        {
+          "email": "demo-load-h1-57@example.com",
+          "number": 12,
+          "code": "GAME_NOT_RUNNING",
+          "message": "Ingen aktiv runde i rommet."
+        }
+      ]
+    },
+    {
+      "position": 2,
+      "slug": "1000-spill",
+      "displayName": "1000-spill",
+      "scheduledGameId": "ee77cb08-9b34-4c72-a6b6-3acd66a56a45",
+      "planRunId": "840908a6-2c65-4cbc-8829-656436ac70f8",
+      "purchaseOpenAt": "2026-05-17T10:15:59.833Z",
+      "roomCode": "BINGO_DEMO-PILOT-GOH",
+      "joins": {
+        "ok": 319,
+        "failed": [
+          {
+            "email": "demo-load-h4-60@example.com",
+            "hallId": "demo-hall-004",
+            "playerName": "H4P60",
+            "message": "game1:join-scheduled ack timeout",
+            "stack": "Error: game1:join-scheduled ack timeout\n    at Timeout._onTimeout (file:///Users/tobiashaugen/Projects/Spillorama-system/scripts/dev/goh-full-plan-run.mjs:645:43)\n    at listOnTimeout (node:internal/timers:605:17)\n    at process.processTimers (node:internal/timers:541:7)"
+          }
+        ]
+      },
+      "purchases": {
+        "ok": 320,
+        "failed": [],
+        "transientFailures": 5,
+        "retried": 5
+      },
+      "ready": {
+        "ok": 0,
+        "failed": []
+      },
+      "start": null,
+      "terminalStatus": null,
+      "completedAt": null,
+      "durationMs": null,
+      "resumes": 0,
+      "summary": null,
+      "socketEventTotals": null
+    }
+  ],
+  "anomalies": [
+    {
+      "at": "2026-05-17T10:14:42.614Z",
+      "type": "purchase.retry.succeeded",
+      "position": 1,
+      "scheduledGameId": "85b8b591-177c-4ca5-b5ac-af6bbaaccf8c",
+      "email": "demo-load-h1-10@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T10:14:43.829Z",
+      "type": "purchase.retry.succeeded",
+      "position": 1,
+      "scheduledGameId": "85b8b591-177c-4ca5-b5ac-af6bbaaccf8c",
+      "email": "demo-load-h1-60@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T10:15:59.769Z",
+      "type": "ticket.mark.failures",
+      "severity": "P1",
+      "position": 1,
+      "scheduledGameId": "85b8b591-177c-4ca5-b5ac-af6bbaaccf8c",
+      "markFailures": 12926,
+      "markFailureCodes": {
+        "GAME_NOT_RUNNING": 12926
+      },
+      "samples": [
+        {
+          "email": "demo-load-h1-1@example.com",
+          "number": 12,
+          "code": "GAME_NOT_RUNNING",
+          "message": "Ingen aktiv runde i rommet."
+        },
+        {
+          "email": "demo-load-h1-1@example.com",
+          "number": 60,
+          "code": "GAME_NOT_RUNNING",
+          "message": "Ingen aktiv runde i rommet."
+        },
+        {
+          "email": "demo-load-h1-1@example.com",
+          "number": 66,
+          "code": "GAME_NOT_RUNNING",
+          "message": "Ingen aktiv runde i rommet."
+        },
+        {
+          "email": "demo-load-h1-2@example.com",
+          "number": 28,
+          "code": "GAME_NOT_RUNNING",
+          "message": "Ingen aktiv runde i rommet."
+        },
+        {
+          "email": "demo-load-h1-2@example.com",
+          "number": 3,
+          "code": "GAME_NOT_RUNNING",
+          "message": "Ingen aktiv runde i rommet."
+        },
+        {
+          "email": "demo-load-h1-2@example.com",
+          "number": 67,
+          "code": "GAME_NOT_RUNNING",
+          "message": "Ingen aktiv runde i rommet."
+        },
+        {
+          "email": "demo-load-h1-3@example.com",
+          "number": 28,
+          "code": "GAME_NOT_RUNNING",
+          "message": "Ingen aktiv runde i rommet."
+        },
+        {
+          "email": "demo-load-h1-3@example.com",
+          "number": 51,
+          "code": "GAME_NOT_RUNNING",
+          "message": "Ingen aktiv runde i rommet."
+        },
+        {
+          "email": "demo-load-h1-3@example.com",
+          "number": 44,
+          "code": "GAME_NOT_RUNNING",
+          "message": "Ingen aktiv runde i rommet."
+        },
+        {
+          "email": "demo-load-h1-4@example.com",
+          "number": 12,
+          "code": "GAME_NOT_RUNNING",
+          "message": "Ingen aktiv runde i rommet."
+        },
+        {
+          "email": "demo-load-h1-4@example.com",
+          "number": 14,
+          "code": "GAME_NOT_RUNNING",
+          "message": "Ingen aktiv runde i rommet."
+        },
+        {
+          "email": "demo-load-h1-4@example.com",
+          "number": 60,
+          "code": "GAME_NOT_RUNNING",
+          "message": "Ingen aktiv runde i rommet."
+        }
+      ],
+      "note": "Scheduled Game1 fullfører via server-side draw/pattern-eval, men klientenes ticket:mark socket-flow feiler og må undersøkes separat."
+    },
+    {
+      "at": "2026-05-17T10:16:52.308Z",
+      "type": "purchase.retry.succeeded",
+      "position": 2,
+      "scheduledGameId": "ee77cb08-9b34-4c72-a6b6-3acd66a56a45",
+      "email": "demo-load-h1-6@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T10:16:52.331Z",
+      "type": "purchase.retry.succeeded",
+      "position": 2,
+      "scheduledGameId": "ee77cb08-9b34-4c72-a6b6-3acd66a56a45",
+      "email": "demo-load-h1-3@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T10:16:52.700Z",
+      "type": "purchase.retry.succeeded",
+      "position": 2,
+      "scheduledGameId": "ee77cb08-9b34-4c72-a6b6-3acd66a56a45",
+      "email": "demo-load-h1-37@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T10:16:53.534Z",
+      "type": "purchase.retry.succeeded",
+      "position": 2,
+      "scheduledGameId": "ee77cb08-9b34-4c72-a6b6-3acd66a56a45",
+      "email": "demo-load-h2-44@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T10:16:53.764Z",
+      "type": "purchase.retry.succeeded",
+      "position": 2,
+      "scheduledGameId": "ee77cb08-9b34-4c72-a6b6-3acd66a56a45",
+      "email": "demo-load-h2-60@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    }
+  ],
+  "failure": {
+    "message": "Round 2 had join/purchase failures",
+    "stack": "Error: Round 2 had join/purchase failures\n    at main (file:///Users/tobiashaugen/Projects/Spillorama-system/scripts/dev/goh-full-plan-run.mjs:180:13)\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)"
+  }
+}

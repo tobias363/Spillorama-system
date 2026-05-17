@@ -2,7 +2,7 @@
 name: goh-master-binding
 description: When the user/agent works with Group of Halls (GoH) and the master-hall role for Spill 1 in the Spillorama bingo platform. Also use when they mention app_hall_groups, app_hall_group_members, master_hall_id, group_hall_id, transferHallAccess, Game1TransferHallService, Game1HallReadyService, resolveParticipatingHallIds, hall-membership filter, ON DELETE CASCADE, hall-cascade-strategy, GoH master pin, BIN-1034, BIN-1038, BIN-453, master-rolle-modellen, master-hall-velger, participating_halls_json, agent-portal master-actions, hall-deactivation, master fallback to run.hall_id, pilot 4-hall (Teknobingo Årnes + Bodø + Brumunddal + Fauske). The master-rolle-modellen says master is a bingovert with extra responsibility, NOT a separate role — the route-guard checks hall-id, not user.role. Make sure to use this skill whenever someone touches hall-group SQL, master_hall_id resolution, transferHallAccess, scheduled-game spawn, or per-hall ready-state — even if they don't mention GoH directly — because mis-binding the master_hall_id silently corrupts every Spill 1 run for that GoH.
 metadata:
-  version: 1.2.0
+  version: 1.3.0
   project: spillorama
 ---
 
@@ -120,9 +120,13 @@ Kanonisk lokal evidence for pilot-GoH:
 - Observability: Sentry/PostHog snapshots før/midt/etter; pilot-monitor P0/P1 = 0.
 
 Known findings:
-- `ticket:mark` socket-flow feilet med `GAME_NOT_RUNNING` på alle runder selv om server-side draw/pattern-eval fullførte. 4x80 bekreftet 164495 mark failures og 0 mark acks. Dette er ikke en GoH-master-binding feil bevist enda, men neste debug må sjekke room-code/currentScheduledGameId/status-resolver i scheduled Spill 1 socket-path.
+- `ticket:mark` socket-flow feilet med `GAME_NOT_RUNNING` på alle runder selv om server-side draw/pattern-eval fullførte. 4x80 bekreftet 164495 mark failures og 0 mark acks.
+- 2026-05-17 rerun etter rev1-fix feilet fortsatt på runde 1: 12926 `GAME_NOT_RUNNING`, 0 `markAcks`. Root cause var at rev1 fortsatt stolte på mutable `RoomSnapshot.scheduledGameId`, som kan nullstilles når canonical room resetter etter round-end.
+- Rev2-kontrakt: GoH-runner og eventuelle klienter som sender `ticket:mark` må ekko `draw:new.gameId` som `scheduledGameId`; backend-validatoren bruker eksplisitt scheduled-game DB-key og tillater late completed-ack for allerede trukket tall på spillerens bong.
+- Postfix-rerun 2026-05-17 verifiserte rev2 i tre 4x80-runder: 39106 `markAcks`, 0 `markFailures`. Full plan stoppet i runde 4 på 5 `game1:join-scheduled ack timeout` i hall 4. Dette er separat P1: scheduled join må retry-es idempotent i runner og spillerklient. Se PITFALLS §4.9.
+- Final mark-retry rerun 2026-05-17 passerte 13/13 planposisjoner med 320 spillere: 4160 purchases, 11960 ticket assignments, 159418 `markAcks`, 0 `markFailures`, 0 join failures etter retry og 0 pilot-monitor P0/P1. Evidence: `docs/evidence/20260517-goh-full-plan-rerun-4x80-markretry/`.
 - Ingen P0/P1 fra pilot-monitor under clean rerun; monitor genererte runde-rapporter 44-56 for alle 13 runder.
-- Synthetic `demo-load-*`-brukere må RG-resettes mellom lokale full-plan-runs, ellers kan `LOSS_LIMIT_EXCEEDED` komme fra stale local testdata.
+- Synthetic `demo-load-*`-brukere må RG-resettes mellom lokale full-plan-runs, og backend persistent state må rehydrereres etter DB-reset (`POST /api/_dev/rehydrate-persistent-state` lokal-only), ellers kan `LOSS_LIMIT_EXCEEDED` komme fra stale local testdata/cache.
 
 ## Immutable beslutninger
 
@@ -154,6 +158,8 @@ Known findings:
 - GoH full-plan result summary: `docs/operations/GOH_FULL_PLAN_TEST_RESULT_2026-05-16.md`
 - GoH full-plan 4x80 evidence: `docs/evidence/20260516-goh-full-plan-run-4x80/`
 - GoH full-plan 4x80 result summary: `docs/operations/GOH_FULL_PLAN_4X80_TEST_RESULT_2026-05-16.md`
+- GoH full-plan 4x80 final pass evidence: `docs/evidence/20260517-goh-full-plan-rerun-4x80-markretry/`
+- GoH full-plan 4x80 rerun summary: `docs/operations/GOH_FULL_PLAN_4X80_RERUN_RESULT_2026-05-17.md`
 - HallGroupService: `apps/backend/src/game/HallGroupService.ts`
 - Hall-ready-service: `apps/backend/src/game/Game1HallReadyService.ts`
 - Transfer-service: `apps/backend/src/game/Game1TransferHallService.ts`

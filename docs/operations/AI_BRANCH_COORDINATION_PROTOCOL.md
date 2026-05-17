@@ -3,6 +3,7 @@
 **Status:** Autoritativ fra 2026-05-16. Oppdatert 2026-05-17 med mandatory fresh-main sync.
 **Formål:** Hindre at Codex- og Claude-sesjoner skaper git-konflikter, kunnskapsdrift eller dobbeltdokumentasjon når begge jobber i samme repo.
 **Gjelder:** Alle PM-er, Codex-sesjoner, Claude-sesjoner og agenter som skriver til `Spillorama-system`.
+**Kort operativ rutine:** [`CODEX_CLAUDE_WORKTREE_ROUTINE.md`](./CODEX_CLAUDE_WORKTREE_ROUTINE.md) er den praktiske start-/rebase-/PR-body-rutinen for hver session.
 
 ---
 
@@ -274,6 +275,7 @@ Hvis runtime-fiksen krever skill/PITFALLS/AGENT_EXECUTION_LOG, gjør det i samme
 
 ## 11. Relaterte dokumenter
 
+- [`CODEX_CLAUDE_WORKTREE_ROUTINE.md`](./CODEX_CLAUDE_WORKTREE_ROUTINE.md)
 - [`PM_SESSION_START_CHECKLIST.md`](./PM_SESSION_START_CHECKLIST.md)
 - [`INCIDENT_MODE_VS_KNOWLEDGE_PROTOCOL.md`](./INCIDENT_MODE_VS_KNOWLEDGE_PROTOCOL.md)
 - [`../engineering/ENGINEERING_WORKFLOW.md`](../engineering/ENGINEERING_WORKFLOW.md)
@@ -288,3 +290,4 @@ Hvis runtime-fiksen krever skill/PITFALLS/AGENT_EXECUTION_LOG, gjør det i samme
 |---|---|
 | 2026-05-16 | Initial — etablert etter Codex/Claude parallellarbeid og konflikt-risiko rundt knowledge logs, workflows og package-filer. |
 | 2026-05-17 | La til mandatory fresh-main sync: alle Codex/Claude-branches skal `git fetch origin` + rebase/merge mot `origin/main` før første filendring og etter at den andre AI-en har merget. PR-body må dokumentere sync for lock-list PR-er. |
+| 2026-05-17 | La til peker til `CODEX_CLAUDE_WORKTREE_ROUTINE.md` som konkret worktree-rutine for Codex/Claude-lanes. |

@@ -1,0 +1,2011 @@
+{
+  "runId": "2026-05-17T11-07-13-004Z",
+  "startedAt": "2026-05-17T11:07:13.004Z",
+  "finishedAt": "2026-05-17T11:41:02.777Z",
+  "backendUrl": "http://localhost:4000",
+  "groupOfHallsId": "demo-pilot-goh",
+  "masterHallId": "demo-hall-001",
+  "halls": [
+    "demo-hall-001",
+    "demo-hall-002",
+    "demo-hall-003",
+    "demo-hall-004"
+  ],
+  "playersPerHall": 80,
+  "purchaseConcurrency": 8,
+  "purchaseRetries": 4,
+  "status": "failed",
+  "monitoring": {
+    "pilotMonitorLog": "/tmp/pilot-monitor.log",
+    "pilotMonitorSnapshot": "/tmp/pilot-monitor-snapshot.md",
+    "sentryAuthTokenPresent": false,
+    "posthogEnvPresent": false
+  },
+  "planItems": [
+    {
+      "position": 1,
+      "slug": "bingo",
+      "displayName": "Bingo",
+      "requiresJackpotSetup": false
+    },
+    {
+      "position": 2,
+      "slug": "1000-spill",
+      "displayName": "1000-spill",
+      "requiresJackpotSetup": false
+    },
+    {
+      "position": 3,
+      "slug": "5x500",
+      "displayName": "5×500",
+      "requiresJackpotSetup": false
+    },
+    {
+      "position": 4,
+      "slug": "ball-x-10",
+      "displayName": "Ball × 10",
+      "requiresJackpotSetup": false
+    },
+    {
+      "position": 5,
+      "slug": "bokstav",
+      "displayName": "Bokstav",
+      "requiresJackpotSetup": false
+    },
+    {
+      "position": 6,
+      "slug": "innsatsen",
+      "displayName": "Innsatsen",
+      "requiresJackpotSetup": false
+    },
+    {
+      "position": 7,
+      "slug": "jackpot",
+      "displayName": "Jackpot",
+      "requiresJackpotSetup": true
+    },
+    {
+      "position": 8,
+      "slug": "kvikkis",
+      "displayName": "Kvikkis",
+      "requiresJackpotSetup": false
+    },
+    {
+      "position": 9,
+      "slug": "oddsen-55",
+      "displayName": "Oddsen 55",
+      "requiresJackpotSetup": false
+    },
+    {
+      "position": 10,
+      "slug": "oddsen-56",
+      "displayName": "Oddsen 56",
+      "requiresJackpotSetup": false
+    },
+    {
+      "position": 11,
+      "slug": "oddsen-57",
+      "displayName": "Oddsen 57",
+      "requiresJackpotSetup": false
+    },
+    {
+      "position": 12,
+      "slug": "trafikklys",
+      "displayName": "Trafikklys",
+      "requiresJackpotSetup": false
+    },
+    {
+      "position": 13,
+      "slug": "tv-extra",
+      "displayName": "TV-Extra",
+      "requiresJackpotSetup": false
+    }
+  ],
+  "clients": {
+    "requested": 320,
+    "loaded": 320,
+    "connected": 320,
+    "connectionFailures": [],
+    "expectedTicketAssignmentsPerRound": 920
+  },
+  "reset": {
+    "recoverStale": {
+      "ok": true,
+      "cleared": {
+        "planRuns": 0,
+        "scheduledGames": 0
+      },
+      "details": {
+        "recoveredAt": "2026-05-17T11:07:13.043Z",
+        "todayBusinessDate": "2026-05-17",
+        "clearedPlanRuns": [],
+        "clearedScheduledGames": []
+      }
+    },
+    "cancelledScheduledGames": 1,
+    "planRunsReset": 1,
+    "businessDate": "2026-05-17",
+    "loadPlayerWalletsToppedUp": 320,
+    "loadPlayerWalletMinDepositNok": 100000,
+    "loadPlayerLossEntriesDeleted": 1235,
+    "loadPlayerPersonalLimitsDeleted": 0,
+    "loadPlayerPendingLimitsDeleted": 0,
+    "lossLimitResetNote": "DB-ledger reset for synthetic demo-load users only. Restart backend after reset if it already had old RG state hydrated in memory."
+  },
+  "rounds": [
+    {
+      "position": 1,
+      "slug": "bingo",
+      "displayName": "Bingo",
+      "scheduledGameId": "a5032275-bed5-48e9-85eb-8f9254053b31",
+      "planRunId": "03b8de63-a455-4cdc-965b-3ad52c61b5ca",
+      "purchaseOpenAt": "2026-05-17T11:18:58.710Z",
+      "roomCode": "BINGO_DEMO-PILOT-GOH",
+      "joins": {
+        "ok": 320,
+        "failed": []
+      },
+      "purchases": {
+        "ok": 320,
+        "failed": [],
+        "transientFailures": 3,
+        "retried": 3
+      },
+      "ready": {
+        "ok": 4,
+        "failed": [],
+        "demo-hall-001": {
+          "gameId": "a5032275-bed5-48e9-85eb-8f9254053b31",
+          "hallId": "demo-hall-001",
+          "hallName": "Demo Bingohall 1 (Master)",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:19:31.472Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": false
+        },
+        "demo-hall-002": {
+          "gameId": "a5032275-bed5-48e9-85eb-8f9254053b31",
+          "hallId": "demo-hall-002",
+          "hallName": "Demo Bingohall 2",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:19:31.479Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": false
+        },
+        "demo-hall-003": {
+          "gameId": "a5032275-bed5-48e9-85eb-8f9254053b31",
+          "hallId": "demo-hall-003",
+          "hallName": "Demo Bingohall 3",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:19:31.485Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": false
+        },
+        "demo-hall-004": {
+          "gameId": "a5032275-bed5-48e9-85eb-8f9254053b31",
+          "hallId": "demo-hall-004",
+          "hallName": "Demo Bingohall 4",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:19:31.490Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": true
+        }
+      },
+      "start": {
+        "scheduledGameId": "a5032275-bed5-48e9-85eb-8f9254053b31",
+        "planRunId": "03b8de63-a455-4cdc-965b-3ad52c61b5ca",
+        "status": "running",
+        "scheduledGameStatus": "running",
+        "inconsistencyWarnings": []
+      },
+      "terminalStatus": "completed",
+      "completedAt": "2026-05-17T11:20:33.837Z",
+      "durationMs": 62344,
+      "resumes": 4,
+      "summary": {
+        "purchases": 320,
+        "amountCents": 1280000,
+        "tickets": 920,
+        "draws": 51,
+        "winners": 7
+      },
+      "socketEventTotals": {
+        "drawEvents": 16320,
+        "markAcks": 10791,
+        "markFailures": 0,
+        "markSkipped": 5529,
+        "markFailureCodes": {},
+        "markFailureSamples": []
+      },
+      "ticketNumberCoverage": {
+        "assignmentRows": 920,
+        "playersWithNumbers": 320
+      }
+    },
+    {
+      "position": 2,
+      "slug": "1000-spill",
+      "displayName": "1000-spill",
+      "scheduledGameId": "85887338-b345-41b5-95b5-8cf94879700d",
+      "planRunId": "03b8de63-a455-4cdc-965b-3ad52c61b5ca",
+      "purchaseOpenAt": "2026-05-17T11:20:33.906Z",
+      "roomCode": "BINGO_DEMO-PILOT-GOH",
+      "joins": {
+        "ok": 320,
+        "failed": []
+      },
+      "purchases": {
+        "ok": 320,
+        "failed": [],
+        "transientFailures": 6,
+        "retried": 5
+      },
+      "ready": {
+        "ok": 4,
+        "failed": [],
+        "demo-hall-001": {
+          "gameId": "85887338-b345-41b5-95b5-8cf94879700d",
+          "hallId": "demo-hall-001",
+          "hallName": "Demo Bingohall 1 (Master)",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:21:08.488Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": false
+        },
+        "demo-hall-002": {
+          "gameId": "85887338-b345-41b5-95b5-8cf94879700d",
+          "hallId": "demo-hall-002",
+          "hallName": "Demo Bingohall 2",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:21:08.495Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": false
+        },
+        "demo-hall-003": {
+          "gameId": "85887338-b345-41b5-95b5-8cf94879700d",
+          "hallId": "demo-hall-003",
+          "hallName": "Demo Bingohall 3",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:21:08.501Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": false
+        },
+        "demo-hall-004": {
+          "gameId": "85887338-b345-41b5-95b5-8cf94879700d",
+          "hallId": "demo-hall-004",
+          "hallName": "Demo Bingohall 4",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:21:08.508Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": true
+        }
+      },
+      "start": {
+        "scheduledGameId": "85887338-b345-41b5-95b5-8cf94879700d",
+        "planRunId": "03b8de63-a455-4cdc-965b-3ad52c61b5ca",
+        "status": "running",
+        "scheduledGameStatus": "running",
+        "inconsistencyWarnings": []
+      },
+      "terminalStatus": "completed",
+      "completedAt": "2026-05-17T11:22:18.957Z",
+      "durationMs": 70446,
+      "resumes": 4,
+      "summary": {
+        "purchases": 320,
+        "amountCents": 1280000,
+        "tickets": 920,
+        "draws": 57,
+        "winners": 7
+      },
+      "socketEventTotals": {
+        "drawEvents": 18240,
+        "markAcks": 12170,
+        "markFailures": 0,
+        "markSkipped": 6070,
+        "markFailureCodes": {},
+        "markFailureSamples": []
+      },
+      "ticketNumberCoverage": {
+        "assignmentRows": 920,
+        "playersWithNumbers": 320
+      }
+    },
+    {
+      "position": 3,
+      "slug": "5x500",
+      "displayName": "5×500",
+      "scheduledGameId": "8e55274f-c500-450d-b828-ab2123c2300e",
+      "planRunId": "03b8de63-a455-4cdc-965b-3ad52c61b5ca",
+      "purchaseOpenAt": "2026-05-17T11:22:19.029Z",
+      "roomCode": "BINGO_DEMO-PILOT-GOH",
+      "joins": {
+        "ok": 320,
+        "failed": []
+      },
+      "purchases": {
+        "ok": 320,
+        "failed": [],
+        "transientFailures": 5,
+        "retried": 5
+      },
+      "ready": {
+        "ok": 4,
+        "failed": [],
+        "demo-hall-001": {
+          "gameId": "8e55274f-c500-450d-b828-ab2123c2300e",
+          "hallId": "demo-hall-001",
+          "hallName": "Demo Bingohall 1 (Master)",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:22:55.870Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": false
+        },
+        "demo-hall-002": {
+          "gameId": "8e55274f-c500-450d-b828-ab2123c2300e",
+          "hallId": "demo-hall-002",
+          "hallName": "Demo Bingohall 2",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:22:55.878Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": false
+        },
+        "demo-hall-003": {
+          "gameId": "8e55274f-c500-450d-b828-ab2123c2300e",
+          "hallId": "demo-hall-003",
+          "hallName": "Demo Bingohall 3",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:22:55.886Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": false
+        },
+        "demo-hall-004": {
+          "gameId": "8e55274f-c500-450d-b828-ab2123c2300e",
+          "hallId": "demo-hall-004",
+          "hallName": "Demo Bingohall 4",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:22:55.894Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": true
+        }
+      },
+      "start": {
+        "scheduledGameId": "8e55274f-c500-450d-b828-ab2123c2300e",
+        "planRunId": "03b8de63-a455-4cdc-965b-3ad52c61b5ca",
+        "status": "running",
+        "scheduledGameStatus": "running",
+        "inconsistencyWarnings": []
+      },
+      "terminalStatus": "completed",
+      "completedAt": "2026-05-17T11:24:08.177Z",
+      "durationMs": 72279,
+      "resumes": 4,
+      "summary": {
+        "purchases": 320,
+        "amountCents": 1280000,
+        "tickets": 920,
+        "draws": 60,
+        "winners": 12
+      },
+      "socketEventTotals": {
+        "drawEvents": 19200,
+        "markAcks": 12694,
+        "markFailures": 0,
+        "markSkipped": 6506,
+        "markFailureCodes": {},
+        "markFailureSamples": []
+      },
+      "ticketNumberCoverage": {
+        "assignmentRows": 920,
+        "playersWithNumbers": 320
+      }
+    },
+    {
+      "position": 4,
+      "slug": "ball-x-10",
+      "displayName": "Ball × 10",
+      "scheduledGameId": "de76ac85-d04c-4252-8e8f-9dc9e027e86e",
+      "planRunId": "03b8de63-a455-4cdc-965b-3ad52c61b5ca",
+      "purchaseOpenAt": "2026-05-17T11:24:08.384Z",
+      "roomCode": "BINGO_DEMO-PILOT-GOH",
+      "joins": {
+        "ok": 320,
+        "failed": []
+      },
+      "purchases": {
+        "ok": 320,
+        "failed": [],
+        "transientFailures": 6,
+        "retried": 6
+      },
+      "ready": {
+        "ok": 4,
+        "failed": [],
+        "demo-hall-001": {
+          "gameId": "de76ac85-d04c-4252-8e8f-9dc9e027e86e",
+          "hallId": "demo-hall-001",
+          "hallName": "Demo Bingohall 1 (Master)",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:24:47.706Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": false
+        },
+        "demo-hall-002": {
+          "gameId": "de76ac85-d04c-4252-8e8f-9dc9e027e86e",
+          "hallId": "demo-hall-002",
+          "hallName": "Demo Bingohall 2",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:24:47.716Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": false
+        },
+        "demo-hall-003": {
+          "gameId": "de76ac85-d04c-4252-8e8f-9dc9e027e86e",
+          "hallId": "demo-hall-003",
+          "hallName": "Demo Bingohall 3",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:24:47.725Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": false
+        },
+        "demo-hall-004": {
+          "gameId": "de76ac85-d04c-4252-8e8f-9dc9e027e86e",
+          "hallId": "demo-hall-004",
+          "hallName": "Demo Bingohall 4",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:24:47.737Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": true
+        }
+      },
+      "start": {
+        "scheduledGameId": "de76ac85-d04c-4252-8e8f-9dc9e027e86e",
+        "planRunId": "03b8de63-a455-4cdc-965b-3ad52c61b5ca",
+        "status": "running",
+        "scheduledGameStatus": "running",
+        "inconsistencyWarnings": []
+      },
+      "terminalStatus": "completed",
+      "completedAt": "2026-05-17T11:26:00.141Z",
+      "durationMs": 72400,
+      "resumes": 4,
+      "summary": {
+        "purchases": 320,
+        "amountCents": 1280000,
+        "tickets": 920,
+        "draws": 62,
+        "winners": 5
+      },
+      "socketEventTotals": {
+        "drawEvents": 19840,
+        "markAcks": 13127,
+        "markFailures": 0,
+        "markSkipped": 6713,
+        "markFailureCodes": {},
+        "markFailureSamples": []
+      },
+      "ticketNumberCoverage": {
+        "assignmentRows": 920,
+        "playersWithNumbers": 320
+      }
+    },
+    {
+      "position": 5,
+      "slug": "bokstav",
+      "displayName": "Bokstav",
+      "scheduledGameId": "b5027c15-f745-4306-9f37-d0583d362588",
+      "planRunId": "03b8de63-a455-4cdc-965b-3ad52c61b5ca",
+      "purchaseOpenAt": "2026-05-17T11:26:00.212Z",
+      "roomCode": "BINGO_DEMO-PILOT-GOH",
+      "joins": {
+        "ok": 320,
+        "failed": []
+      },
+      "purchases": {
+        "ok": 320,
+        "failed": [],
+        "transientFailures": 6,
+        "retried": 6
+      },
+      "ready": {
+        "ok": 4,
+        "failed": [],
+        "demo-hall-001": {
+          "gameId": "b5027c15-f745-4306-9f37-d0583d362588",
+          "hallId": "demo-hall-001",
+          "hallName": "Demo Bingohall 1 (Master)",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:26:39.316Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": false
+        },
+        "demo-hall-002": {
+          "gameId": "b5027c15-f745-4306-9f37-d0583d362588",
+          "hallId": "demo-hall-002",
+          "hallName": "Demo Bingohall 2",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:26:39.325Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": false
+        },
+        "demo-hall-003": {
+          "gameId": "b5027c15-f745-4306-9f37-d0583d362588",
+          "hallId": "demo-hall-003",
+          "hallName": "Demo Bingohall 3",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:26:39.334Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": false
+        },
+        "demo-hall-004": {
+          "gameId": "b5027c15-f745-4306-9f37-d0583d362588",
+          "hallId": "demo-hall-004",
+          "hallName": "Demo Bingohall 4",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:26:39.342Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": true
+        }
+      },
+      "start": {
+        "scheduledGameId": "b5027c15-f745-4306-9f37-d0583d362588",
+        "planRunId": "03b8de63-a455-4cdc-965b-3ad52c61b5ca",
+        "status": "running",
+        "scheduledGameStatus": "running",
+        "inconsistencyWarnings": []
+      },
+      "terminalStatus": "completed",
+      "completedAt": "2026-05-17T11:27:46.237Z",
+      "durationMs": 66892,
+      "resumes": 4,
+      "summary": {
+        "purchases": 320,
+        "amountCents": 1280000,
+        "tickets": 920,
+        "draws": 58,
+        "winners": 7
+      },
+      "socketEventTotals": {
+        "drawEvents": 18560,
+        "markAcks": 12266,
+        "markFailures": 0,
+        "markSkipped": 6294,
+        "markFailureCodes": {},
+        "markFailureSamples": []
+      },
+      "ticketNumberCoverage": {
+        "assignmentRows": 920,
+        "playersWithNumbers": 320
+      }
+    },
+    {
+      "position": 6,
+      "slug": "innsatsen",
+      "displayName": "Innsatsen",
+      "scheduledGameId": "9ab4c45f-b96c-42d1-a6f6-1afee56e2458",
+      "planRunId": "03b8de63-a455-4cdc-965b-3ad52c61b5ca",
+      "purchaseOpenAt": "2026-05-17T11:27:46.478Z",
+      "roomCode": "BINGO_DEMO-PILOT-GOH",
+      "joins": {
+        "ok": 320,
+        "failed": []
+      },
+      "purchases": {
+        "ok": 320,
+        "failed": [],
+        "transientFailures": 8,
+        "retried": 8
+      },
+      "ready": {
+        "ok": 4,
+        "failed": [],
+        "demo-hall-001": {
+          "gameId": "9ab4c45f-b96c-42d1-a6f6-1afee56e2458",
+          "hallId": "demo-hall-001",
+          "hallName": "Demo Bingohall 1 (Master)",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:28:27.278Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": false
+        },
+        "demo-hall-002": {
+          "gameId": "9ab4c45f-b96c-42d1-a6f6-1afee56e2458",
+          "hallId": "demo-hall-002",
+          "hallName": "Demo Bingohall 2",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:28:27.288Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": false
+        },
+        "demo-hall-003": {
+          "gameId": "9ab4c45f-b96c-42d1-a6f6-1afee56e2458",
+          "hallId": "demo-hall-003",
+          "hallName": "Demo Bingohall 3",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:28:27.297Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": false
+        },
+        "demo-hall-004": {
+          "gameId": "9ab4c45f-b96c-42d1-a6f6-1afee56e2458",
+          "hallId": "demo-hall-004",
+          "hallName": "Demo Bingohall 4",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:28:27.306Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": true
+        }
+      },
+      "start": {
+        "scheduledGameId": "9ab4c45f-b96c-42d1-a6f6-1afee56e2458",
+        "planRunId": "03b8de63-a455-4cdc-965b-3ad52c61b5ca",
+        "status": "running",
+        "scheduledGameStatus": "running",
+        "inconsistencyWarnings": []
+      },
+      "terminalStatus": "completed",
+      "completedAt": "2026-05-17T11:29:33.389Z",
+      "durationMs": 66079,
+      "resumes": 4,
+      "summary": {
+        "purchases": 320,
+        "amountCents": 1280000,
+        "tickets": 920,
+        "draws": 59,
+        "winners": 6
+      },
+      "socketEventTotals": {
+        "drawEvents": 18880,
+        "markAcks": 12336,
+        "markFailures": 0,
+        "markSkipped": 6392,
+        "markFailureCodes": {},
+        "markFailureSamples": []
+      },
+      "ticketNumberCoverage": {
+        "assignmentRows": 920,
+        "playersWithNumbers": 320
+      }
+    },
+    {
+      "position": 7,
+      "slug": "jackpot",
+      "displayName": "Jackpot",
+      "scheduledGameId": "50443121-e0dd-454e-b02d-56409d0d444e",
+      "planRunId": "03b8de63-a455-4cdc-965b-3ad52c61b5ca",
+      "purchaseOpenAt": "2026-05-17T11:29:33.646Z",
+      "roomCode": "BINGO_DEMO-PILOT-GOH",
+      "joins": {
+        "ok": 320,
+        "failed": []
+      },
+      "purchases": {
+        "ok": 320,
+        "failed": [],
+        "transientFailures": 5,
+        "retried": 5
+      },
+      "ready": {
+        "ok": 4,
+        "failed": [],
+        "demo-hall-001": {
+          "gameId": "50443121-e0dd-454e-b02d-56409d0d444e",
+          "hallId": "demo-hall-001",
+          "hallName": "Demo Bingohall 1 (Master)",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:30:13.971Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": false
+        },
+        "demo-hall-002": {
+          "gameId": "50443121-e0dd-454e-b02d-56409d0d444e",
+          "hallId": "demo-hall-002",
+          "hallName": "Demo Bingohall 2",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:30:13.980Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": false
+        },
+        "demo-hall-003": {
+          "gameId": "50443121-e0dd-454e-b02d-56409d0d444e",
+          "hallId": "demo-hall-003",
+          "hallName": "Demo Bingohall 3",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:30:13.989Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": false
+        },
+        "demo-hall-004": {
+          "gameId": "50443121-e0dd-454e-b02d-56409d0d444e",
+          "hallId": "demo-hall-004",
+          "hallName": "Demo Bingohall 4",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:30:13.997Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": true
+        }
+      },
+      "start": {
+        "scheduledGameId": "50443121-e0dd-454e-b02d-56409d0d444e",
+        "planRunId": "03b8de63-a455-4cdc-965b-3ad52c61b5ca",
+        "status": "running",
+        "scheduledGameStatus": "running",
+        "inconsistencyWarnings": []
+      },
+      "terminalStatus": "completed",
+      "completedAt": "2026-05-17T11:31:28.996Z",
+      "durationMs": 74995,
+      "resumes": 4,
+      "summary": {
+        "purchases": 320,
+        "amountCents": 1280000,
+        "tickets": 920,
+        "draws": 59,
+        "winners": 7
+      },
+      "socketEventTotals": {
+        "drawEvents": 18880,
+        "markAcks": 12512,
+        "markFailures": 0,
+        "markSkipped": 6368,
+        "markFailureCodes": {},
+        "markFailureSamples": []
+      },
+      "ticketNumberCoverage": {
+        "assignmentRows": 920,
+        "playersWithNumbers": 320
+      }
+    },
+    {
+      "position": 8,
+      "slug": "kvikkis",
+      "displayName": "Kvikkis",
+      "scheduledGameId": "fc267abe-9408-479b-b40f-3d2dbb3368c4",
+      "planRunId": "03b8de63-a455-4cdc-965b-3ad52c61b5ca",
+      "purchaseOpenAt": "2026-05-17T11:31:29.065Z",
+      "roomCode": "BINGO_DEMO-PILOT-GOH",
+      "joins": {
+        "ok": 320,
+        "failed": []
+      },
+      "purchases": {
+        "ok": 320,
+        "failed": [],
+        "transientFailures": 6,
+        "retried": 6
+      },
+      "ready": {
+        "ok": 4,
+        "failed": [],
+        "demo-hall-001": {
+          "gameId": "fc267abe-9408-479b-b40f-3d2dbb3368c4",
+          "hallId": "demo-hall-001",
+          "hallName": "Demo Bingohall 1 (Master)",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:32:09.574Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": false
+        },
+        "demo-hall-002": {
+          "gameId": "fc267abe-9408-479b-b40f-3d2dbb3368c4",
+          "hallId": "demo-hall-002",
+          "hallName": "Demo Bingohall 2",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:32:09.583Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": false
+        },
+        "demo-hall-003": {
+          "gameId": "fc267abe-9408-479b-b40f-3d2dbb3368c4",
+          "hallId": "demo-hall-003",
+          "hallName": "Demo Bingohall 3",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:32:09.591Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": false
+        },
+        "demo-hall-004": {
+          "gameId": "fc267abe-9408-479b-b40f-3d2dbb3368c4",
+          "hallId": "demo-hall-004",
+          "hallName": "Demo Bingohall 4",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:32:09.600Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": true
+        }
+      },
+      "start": {
+        "scheduledGameId": "fc267abe-9408-479b-b40f-3d2dbb3368c4",
+        "planRunId": "03b8de63-a455-4cdc-965b-3ad52c61b5ca",
+        "status": "running",
+        "scheduledGameStatus": "running",
+        "inconsistencyWarnings": []
+      },
+      "terminalStatus": "completed",
+      "completedAt": "2026-05-17T11:33:21.999Z",
+      "durationMs": 72395,
+      "resumes": 4,
+      "summary": {
+        "purchases": 320,
+        "amountCents": 1280000,
+        "tickets": 920,
+        "draws": 63,
+        "winners": 5
+      },
+      "socketEventTotals": {
+        "drawEvents": 20160,
+        "markAcks": 13255,
+        "markFailures": 0,
+        "markSkipped": 6905,
+        "markFailureCodes": {},
+        "markFailureSamples": []
+      },
+      "ticketNumberCoverage": {
+        "assignmentRows": 920,
+        "playersWithNumbers": 320
+      }
+    },
+    {
+      "position": 9,
+      "slug": "oddsen-55",
+      "displayName": "Oddsen 55",
+      "scheduledGameId": "b5107a04-c58d-4f8a-8457-bd85fb8552c6",
+      "planRunId": "03b8de63-a455-4cdc-965b-3ad52c61b5ca",
+      "purchaseOpenAt": "2026-05-17T11:33:22.067Z",
+      "roomCode": "BINGO_DEMO-PILOT-GOH",
+      "joins": {
+        "ok": 320,
+        "failed": []
+      },
+      "purchases": {
+        "ok": 320,
+        "failed": [],
+        "transientFailures": 7,
+        "retried": 7
+      },
+      "ready": {
+        "ok": 4,
+        "failed": [],
+        "demo-hall-001": {
+          "gameId": "b5107a04-c58d-4f8a-8457-bd85fb8552c6",
+          "hallId": "demo-hall-001",
+          "hallName": "Demo Bingohall 1 (Master)",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:34:01.278Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": false
+        },
+        "demo-hall-002": {
+          "gameId": "b5107a04-c58d-4f8a-8457-bd85fb8552c6",
+          "hallId": "demo-hall-002",
+          "hallName": "Demo Bingohall 2",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:34:01.287Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": false
+        },
+        "demo-hall-003": {
+          "gameId": "b5107a04-c58d-4f8a-8457-bd85fb8552c6",
+          "hallId": "demo-hall-003",
+          "hallName": "Demo Bingohall 3",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:34:01.296Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": false
+        },
+        "demo-hall-004": {
+          "gameId": "b5107a04-c58d-4f8a-8457-bd85fb8552c6",
+          "hallId": "demo-hall-004",
+          "hallName": "Demo Bingohall 4",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:34:01.305Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": true
+        }
+      },
+      "start": {
+        "scheduledGameId": "b5107a04-c58d-4f8a-8457-bd85fb8552c6",
+        "planRunId": "03b8de63-a455-4cdc-965b-3ad52c61b5ca",
+        "status": "running",
+        "scheduledGameStatus": "running",
+        "inconsistencyWarnings": []
+      },
+      "terminalStatus": "completed",
+      "completedAt": "2026-05-17T11:35:06.669Z",
+      "durationMs": 65361,
+      "resumes": 4,
+      "summary": {
+        "purchases": 320,
+        "amountCents": 1280000,
+        "tickets": 920,
+        "draws": 53,
+        "winners": 8
+      },
+      "socketEventTotals": {
+        "drawEvents": 16960,
+        "markAcks": 11157,
+        "markFailures": 0,
+        "markSkipped": 5803,
+        "markFailureCodes": {},
+        "markFailureSamples": []
+      },
+      "ticketNumberCoverage": {
+        "assignmentRows": 920,
+        "playersWithNumbers": 320
+      }
+    },
+    {
+      "position": 10,
+      "slug": "oddsen-56",
+      "displayName": "Oddsen 56",
+      "scheduledGameId": "b3769bef-7059-4207-bc0b-a877011d95b3",
+      "planRunId": "03b8de63-a455-4cdc-965b-3ad52c61b5ca",
+      "purchaseOpenAt": "2026-05-17T11:35:06.737Z",
+      "roomCode": "BINGO_DEMO-PILOT-GOH",
+      "joins": {
+        "ok": 320,
+        "failed": []
+      },
+      "purchases": {
+        "ok": 320,
+        "failed": [],
+        "transientFailures": 5,
+        "retried": 5
+      },
+      "ready": {
+        "ok": 4,
+        "failed": [],
+        "demo-hall-001": {
+          "gameId": "b3769bef-7059-4207-bc0b-a877011d95b3",
+          "hallId": "demo-hall-001",
+          "hallName": "Demo Bingohall 1 (Master)",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:35:46.340Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": false
+        },
+        "demo-hall-002": {
+          "gameId": "b3769bef-7059-4207-bc0b-a877011d95b3",
+          "hallId": "demo-hall-002",
+          "hallName": "Demo Bingohall 2",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:35:46.350Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": false
+        },
+        "demo-hall-003": {
+          "gameId": "b3769bef-7059-4207-bc0b-a877011d95b3",
+          "hallId": "demo-hall-003",
+          "hallName": "Demo Bingohall 3",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:35:46.359Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": false
+        },
+        "demo-hall-004": {
+          "gameId": "b3769bef-7059-4207-bc0b-a877011d95b3",
+          "hallId": "demo-hall-004",
+          "hallName": "Demo Bingohall 4",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:35:46.368Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": true
+        }
+      },
+      "start": {
+        "scheduledGameId": "b3769bef-7059-4207-bc0b-a877011d95b3",
+        "planRunId": "03b8de63-a455-4cdc-965b-3ad52c61b5ca",
+        "status": "running",
+        "scheduledGameStatus": "running",
+        "inconsistencyWarnings": []
+      },
+      "terminalStatus": "completed",
+      "completedAt": "2026-05-17T11:36:58.511Z",
+      "durationMs": 72139,
+      "resumes": 4,
+      "summary": {
+        "purchases": 320,
+        "amountCents": 1280000,
+        "tickets": 920,
+        "draws": 60,
+        "winners": 6
+      },
+      "socketEventTotals": {
+        "drawEvents": 19200,
+        "markAcks": 12747,
+        "markFailures": 0,
+        "markSkipped": 6453,
+        "markFailureCodes": {},
+        "markFailureSamples": []
+      },
+      "ticketNumberCoverage": {
+        "assignmentRows": 920,
+        "playersWithNumbers": 320
+      }
+    },
+    {
+      "position": 11,
+      "slug": "oddsen-57",
+      "displayName": "Oddsen 57",
+      "scheduledGameId": "cee17c84-4627-4016-83e3-9b2900abeeb7",
+      "planRunId": "03b8de63-a455-4cdc-965b-3ad52c61b5ca",
+      "purchaseOpenAt": "2026-05-17T11:36:58.872Z",
+      "roomCode": "BINGO_DEMO-PILOT-GOH",
+      "joins": {
+        "ok": 320,
+        "failed": []
+      },
+      "purchases": {
+        "ok": 320,
+        "failed": [],
+        "transientFailures": 7,
+        "retried": 7
+      },
+      "ready": {
+        "ok": 4,
+        "failed": [],
+        "demo-hall-001": {
+          "gameId": "cee17c84-4627-4016-83e3-9b2900abeeb7",
+          "hallId": "demo-hall-001",
+          "hallName": "Demo Bingohall 1 (Master)",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:37:40.144Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": false
+        },
+        "demo-hall-002": {
+          "gameId": "cee17c84-4627-4016-83e3-9b2900abeeb7",
+          "hallId": "demo-hall-002",
+          "hallName": "Demo Bingohall 2",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:37:40.155Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": false
+        },
+        "demo-hall-003": {
+          "gameId": "cee17c84-4627-4016-83e3-9b2900abeeb7",
+          "hallId": "demo-hall-003",
+          "hallName": "Demo Bingohall 3",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:37:40.164Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": false
+        },
+        "demo-hall-004": {
+          "gameId": "cee17c84-4627-4016-83e3-9b2900abeeb7",
+          "hallId": "demo-hall-004",
+          "hallName": "Demo Bingohall 4",
+          "isReady": true,
+          "readyAt": "2026-05-17T11:37:40.173Z",
+          "readyByUserId": "demo-user-admin-tobias",
+          "digitalSold": 230,
+          "physicalSold": 0,
+          "excludedFromGame": false,
+          "allReady": true
+        }
+      },
+      "start": {
+        "scheduledGameId": "cee17c84-4627-4016-83e3-9b2900abeeb7",
+        "planRunId": "03b8de63-a455-4cdc-965b-3ad52c61b5ca",
+        "status": "running",
+        "scheduledGameStatus": "running",
+        "inconsistencyWarnings": []
+      },
+      "terminalStatus": "completed",
+      "completedAt": "2026-05-17T11:39:01.814Z",
+      "durationMs": 81637,
+      "resumes": 4,
+      "summary": {
+        "purchases": 320,
+        "amountCents": 1280000,
+        "tickets": 920,
+        "draws": 60,
+        "winners": 6
+      },
+      "socketEventTotals": {
+        "drawEvents": 19200,
+        "markAcks": 12380,
+        "markFailures": 0,
+        "markSkipped": 6607,
+        "markFailureCodes": {},
+        "markFailureSamples": []
+      },
+      "ticketNumberCoverage": {
+        "assignmentRows": 920,
+        "playersWithNumbers": 320
+      }
+    },
+    {
+      "position": 12,
+      "slug": "trafikklys",
+      "displayName": "Trafikklys",
+      "scheduledGameId": "d3e46acb-b553-4149-88ea-41b5ee8f5cda",
+      "planRunId": "03b8de63-a455-4cdc-965b-3ad52c61b5ca",
+      "purchaseOpenAt": "2026-05-17T11:39:02.051Z",
+      "roomCode": "BINGO_DEMO-PILOT-GOH",
+      "joins": {
+        "ok": 319,
+        "failed": [
+          {
+            "email": "demo-load-h4-80@example.com",
+            "hallId": "demo-hall-004",
+            "playerName": "H4P80",
+            "message": "game1:join-scheduled ack timeout",
+            "stack": "Error: game1:join-scheduled ack timeout\n    at Timeout._onTimeout (file:///Users/tobiashaugen/Projects/Spillorama-system/scripts/dev/goh-full-plan-run.mjs:646:43)\n    at listOnTimeout (node:internal/timers:605:17)\n    at process.processTimers (node:internal/timers:541:7)"
+          }
+        ],
+        "transientFailures": 2
+      },
+      "purchases": {
+        "ok": 320,
+        "failed": [],
+        "transientFailures": 7,
+        "retried": 7
+      },
+      "ready": {
+        "ok": 0,
+        "failed": []
+      },
+      "start": null,
+      "terminalStatus": null,
+      "completedAt": null,
+      "durationMs": null,
+      "resumes": 0,
+      "summary": null,
+      "socketEventTotals": null
+    }
+  ],
+  "anomalies": [
+    {
+      "at": "2026-05-17T11:19:29.658Z",
+      "type": "purchase.retry.succeeded",
+      "position": 1,
+      "scheduledGameId": "a5032275-bed5-48e9-85eb-8f9254053b31",
+      "email": "demo-load-h1-6@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:19:29.717Z",
+      "type": "purchase.retry.succeeded",
+      "position": 1,
+      "scheduledGameId": "a5032275-bed5-48e9-85eb-8f9254053b31",
+      "email": "demo-load-h1-47@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:19:30.315Z",
+      "type": "purchase.retry.succeeded",
+      "position": 1,
+      "scheduledGameId": "a5032275-bed5-48e9-85eb-8f9254053b31",
+      "email": "demo-load-h2-28@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:21:06.611Z",
+      "type": "purchase.retry.succeeded",
+      "position": 2,
+      "scheduledGameId": "85887338-b345-41b5-95b5-8cf94879700d",
+      "email": "demo-load-h1-3@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:21:07.148Z",
+      "type": "purchase.retry.succeeded",
+      "position": 2,
+      "scheduledGameId": "85887338-b345-41b5-95b5-8cf94879700d",
+      "email": "demo-load-h1-53@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:21:07.273Z",
+      "type": "purchase.retry.succeeded",
+      "position": 2,
+      "scheduledGameId": "85887338-b345-41b5-95b5-8cf94879700d",
+      "email": "demo-load-h1-80@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:21:07.644Z",
+      "type": "purchase.retry.succeeded",
+      "position": 2,
+      "scheduledGameId": "85887338-b345-41b5-95b5-8cf94879700d",
+      "email": "demo-load-h2-28@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:21:08.118Z",
+      "type": "purchase.retry.succeeded",
+      "position": 2,
+      "scheduledGameId": "85887338-b345-41b5-95b5-8cf94879700d",
+      "email": "demo-load-h1-36@example.com",
+      "attempts": 3,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:22:53.314Z",
+      "type": "purchase.retry.succeeded",
+      "position": 3,
+      "scheduledGameId": "8e55274f-c500-450d-b828-ab2123c2300e",
+      "email": "demo-load-h1-37@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:22:53.368Z",
+      "type": "purchase.retry.succeeded",
+      "position": 3,
+      "scheduledGameId": "8e55274f-c500-450d-b828-ab2123c2300e",
+      "email": "demo-load-h1-40@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:22:53.856Z",
+      "type": "purchase.retry.succeeded",
+      "position": 3,
+      "scheduledGameId": "8e55274f-c500-450d-b828-ab2123c2300e",
+      "email": "demo-load-h2-8@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:22:55.529Z",
+      "type": "purchase.retry.succeeded",
+      "position": 3,
+      "scheduledGameId": "8e55274f-c500-450d-b828-ab2123c2300e",
+      "email": "demo-load-h3-57@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:22:55.591Z",
+      "type": "purchase.retry.succeeded",
+      "position": 3,
+      "scheduledGameId": "8e55274f-c500-450d-b828-ab2123c2300e",
+      "email": "demo-load-h4-3@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:24:45.273Z",
+      "type": "purchase.retry.succeeded",
+      "position": 4,
+      "scheduledGameId": "de76ac85-d04c-4252-8e8f-9dc9e027e86e",
+      "email": "demo-load-h1-34@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:24:45.581Z",
+      "type": "purchase.retry.succeeded",
+      "position": 4,
+      "scheduledGameId": "de76ac85-d04c-4252-8e8f-9dc9e027e86e",
+      "email": "demo-load-h1-80@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:24:45.821Z",
+      "type": "purchase.retry.succeeded",
+      "position": 4,
+      "scheduledGameId": "de76ac85-d04c-4252-8e8f-9dc9e027e86e",
+      "email": "demo-load-h1-77@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:24:45.876Z",
+      "type": "purchase.retry.succeeded",
+      "position": 4,
+      "scheduledGameId": "de76ac85-d04c-4252-8e8f-9dc9e027e86e",
+      "email": "demo-load-h2-15@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:24:47.417Z",
+      "type": "purchase.retry.succeeded",
+      "position": 4,
+      "scheduledGameId": "de76ac85-d04c-4252-8e8f-9dc9e027e86e",
+      "email": "demo-load-h3-71@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:24:47.689Z",
+      "type": "purchase.retry.succeeded",
+      "position": 4,
+      "scheduledGameId": "de76ac85-d04c-4252-8e8f-9dc9e027e86e",
+      "email": "demo-load-h4-28@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:26:36.280Z",
+      "type": "purchase.retry.succeeded",
+      "position": 5,
+      "scheduledGameId": "b5027c15-f745-4306-9f37-d0583d362588",
+      "email": "demo-load-h1-7@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:26:36.447Z",
+      "type": "purchase.retry.succeeded",
+      "position": 5,
+      "scheduledGameId": "b5027c15-f745-4306-9f37-d0583d362588",
+      "email": "demo-load-h1-16@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:26:37.356Z",
+      "type": "purchase.retry.succeeded",
+      "position": 5,
+      "scheduledGameId": "b5027c15-f745-4306-9f37-d0583d362588",
+      "email": "demo-load-h2-21@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:26:38.123Z",
+      "type": "purchase.retry.succeeded",
+      "position": 5,
+      "scheduledGameId": "b5027c15-f745-4306-9f37-d0583d362588",
+      "email": "demo-load-h3-4@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:26:38.154Z",
+      "type": "purchase.retry.succeeded",
+      "position": 5,
+      "scheduledGameId": "b5027c15-f745-4306-9f37-d0583d362588",
+      "email": "demo-load-h2-76@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:26:38.659Z",
+      "type": "purchase.retry.succeeded",
+      "position": 5,
+      "scheduledGameId": "b5027c15-f745-4306-9f37-d0583d362588",
+      "email": "demo-load-h3-47@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:28:23.577Z",
+      "type": "purchase.retry.succeeded",
+      "position": 6,
+      "scheduledGameId": "9ab4c45f-b96c-42d1-a6f6-1afee56e2458",
+      "email": "demo-load-h1-2@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:28:23.659Z",
+      "type": "purchase.retry.succeeded",
+      "position": 6,
+      "scheduledGameId": "9ab4c45f-b96c-42d1-a6f6-1afee56e2458",
+      "email": "demo-load-h1-1@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:28:23.668Z",
+      "type": "purchase.retry.succeeded",
+      "position": 6,
+      "scheduledGameId": "9ab4c45f-b96c-42d1-a6f6-1afee56e2458",
+      "email": "demo-load-h1-7@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:28:23.838Z",
+      "type": "purchase.retry.succeeded",
+      "position": 6,
+      "scheduledGameId": "9ab4c45f-b96c-42d1-a6f6-1afee56e2458",
+      "email": "demo-load-h1-5@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:28:25.054Z",
+      "type": "purchase.retry.succeeded",
+      "position": 6,
+      "scheduledGameId": "9ab4c45f-b96c-42d1-a6f6-1afee56e2458",
+      "email": "demo-load-h2-12@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:28:25.417Z",
+      "type": "purchase.retry.succeeded",
+      "position": 6,
+      "scheduledGameId": "9ab4c45f-b96c-42d1-a6f6-1afee56e2458",
+      "email": "demo-load-h2-15@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:28:25.556Z",
+      "type": "purchase.retry.succeeded",
+      "position": 6,
+      "scheduledGameId": "9ab4c45f-b96c-42d1-a6f6-1afee56e2458",
+      "email": "demo-load-h2-49@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:28:26.690Z",
+      "type": "purchase.retry.succeeded",
+      "position": 6,
+      "scheduledGameId": "9ab4c45f-b96c-42d1-a6f6-1afee56e2458",
+      "email": "demo-load-h3-53@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:29:33.522Z",
+      "type": "jackpot.setup.applied",
+      "position": 7,
+      "draw": 56,
+      "prizesCents": {
+        "gul": 200000,
+        "hvit": 100000,
+        "lilla": 300000
+      },
+      "result": {
+        "scheduledGameId": "9ab4c45f-b96c-42d1-a6f6-1afee56e2458",
+        "planRunId": "03b8de63-a455-4cdc-965b-3ad52c61b5ca",
+        "status": "running",
+        "scheduledGameStatus": "completed",
+        "inconsistencyWarnings": []
+      }
+    },
+    {
+      "at": "2026-05-17T11:30:11.356Z",
+      "type": "purchase.retry.succeeded",
+      "position": 7,
+      "scheduledGameId": "50443121-e0dd-454e-b02d-56409d0d444e",
+      "email": "demo-load-h1-13@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:30:11.426Z",
+      "type": "purchase.retry.succeeded",
+      "position": 7,
+      "scheduledGameId": "50443121-e0dd-454e-b02d-56409d0d444e",
+      "email": "demo-load-h1-12@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:30:12.317Z",
+      "type": "purchase.retry.succeeded",
+      "position": 7,
+      "scheduledGameId": "50443121-e0dd-454e-b02d-56409d0d444e",
+      "email": "demo-load-h2-32@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:30:12.937Z",
+      "type": "purchase.retry.succeeded",
+      "position": 7,
+      "scheduledGameId": "50443121-e0dd-454e-b02d-56409d0d444e",
+      "email": "demo-load-h2-79@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:30:13.228Z",
+      "type": "purchase.retry.succeeded",
+      "position": 7,
+      "scheduledGameId": "50443121-e0dd-454e-b02d-56409d0d444e",
+      "email": "demo-load-h3-30@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:32:06.862Z",
+      "type": "purchase.retry.succeeded",
+      "position": 8,
+      "scheduledGameId": "fc267abe-9408-479b-b40f-3d2dbb3368c4",
+      "email": "demo-load-h1-6@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:32:07.494Z",
+      "type": "purchase.retry.succeeded",
+      "position": 8,
+      "scheduledGameId": "fc267abe-9408-479b-b40f-3d2dbb3368c4",
+      "email": "demo-load-h1-5@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:32:08.533Z",
+      "type": "purchase.retry.succeeded",
+      "position": 8,
+      "scheduledGameId": "fc267abe-9408-479b-b40f-3d2dbb3368c4",
+      "email": "demo-load-h2-74@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:32:08.559Z",
+      "type": "purchase.retry.succeeded",
+      "position": 8,
+      "scheduledGameId": "fc267abe-9408-479b-b40f-3d2dbb3368c4",
+      "email": "demo-load-h3-3@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:32:08.771Z",
+      "type": "purchase.retry.succeeded",
+      "position": 8,
+      "scheduledGameId": "fc267abe-9408-479b-b40f-3d2dbb3368c4",
+      "email": "demo-load-h2-22@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:32:09.427Z",
+      "type": "purchase.retry.succeeded",
+      "position": 8,
+      "scheduledGameId": "fc267abe-9408-479b-b40f-3d2dbb3368c4",
+      "email": "demo-load-h3-72@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:33:58.134Z",
+      "type": "purchase.retry.succeeded",
+      "position": 9,
+      "scheduledGameId": "b5107a04-c58d-4f8a-8457-bd85fb8552c6",
+      "email": "demo-load-h1-8@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:33:58.662Z",
+      "type": "purchase.retry.succeeded",
+      "position": 9,
+      "scheduledGameId": "b5107a04-c58d-4f8a-8457-bd85fb8552c6",
+      "email": "demo-load-h1-61@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:33:59.649Z",
+      "type": "purchase.retry.succeeded",
+      "position": 9,
+      "scheduledGameId": "b5107a04-c58d-4f8a-8457-bd85fb8552c6",
+      "email": "demo-load-h1-75@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:33:59.982Z",
+      "type": "purchase.retry.succeeded",
+      "position": 9,
+      "scheduledGameId": "b5107a04-c58d-4f8a-8457-bd85fb8552c6",
+      "email": "demo-load-h3-11@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:34:00.225Z",
+      "type": "purchase.retry.succeeded",
+      "position": 9,
+      "scheduledGameId": "b5107a04-c58d-4f8a-8457-bd85fb8552c6",
+      "email": "demo-load-h3-41@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:34:01.092Z",
+      "type": "purchase.retry.succeeded",
+      "position": 9,
+      "scheduledGameId": "b5107a04-c58d-4f8a-8457-bd85fb8552c6",
+      "email": "demo-load-h4-31@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:34:01.272Z",
+      "type": "purchase.retry.succeeded",
+      "position": 9,
+      "scheduledGameId": "b5107a04-c58d-4f8a-8457-bd85fb8552c6",
+      "email": "demo-load-h4-40@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:35:43.203Z",
+      "type": "purchase.retry.succeeded",
+      "position": 10,
+      "scheduledGameId": "b3769bef-7059-4207-bc0b-a877011d95b3",
+      "email": "demo-load-h1-3@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:35:44.141Z",
+      "type": "purchase.retry.succeeded",
+      "position": 10,
+      "scheduledGameId": "b3769bef-7059-4207-bc0b-a877011d95b3",
+      "email": "demo-load-h2-5@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:35:44.382Z",
+      "type": "purchase.retry.succeeded",
+      "position": 10,
+      "scheduledGameId": "b3769bef-7059-4207-bc0b-a877011d95b3",
+      "email": "demo-load-h2-16@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:35:45.224Z",
+      "type": "purchase.retry.succeeded",
+      "position": 10,
+      "scheduledGameId": "b3769bef-7059-4207-bc0b-a877011d95b3",
+      "email": "demo-load-h3-18@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:35:45.802Z",
+      "type": "purchase.retry.succeeded",
+      "position": 10,
+      "scheduledGameId": "b3769bef-7059-4207-bc0b-a877011d95b3",
+      "email": "demo-load-h3-6@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:37:36.372Z",
+      "type": "purchase.retry.succeeded",
+      "position": 11,
+      "scheduledGameId": "cee17c84-4627-4016-83e3-9b2900abeeb7",
+      "email": "demo-load-h1-6@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:37:37.151Z",
+      "type": "purchase.retry.succeeded",
+      "position": 11,
+      "scheduledGameId": "cee17c84-4627-4016-83e3-9b2900abeeb7",
+      "email": "demo-load-h1-66@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:37:37.646Z",
+      "type": "purchase.retry.succeeded",
+      "position": 11,
+      "scheduledGameId": "cee17c84-4627-4016-83e3-9b2900abeeb7",
+      "email": "demo-load-h2-20@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:37:38.971Z",
+      "type": "purchase.retry.succeeded",
+      "position": 11,
+      "scheduledGameId": "cee17c84-4627-4016-83e3-9b2900abeeb7",
+      "email": "demo-load-h3-36@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:37:39.051Z",
+      "type": "purchase.retry.succeeded",
+      "position": 11,
+      "scheduledGameId": "cee17c84-4627-4016-83e3-9b2900abeeb7",
+      "email": "demo-load-h3-49@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:37:39.093Z",
+      "type": "purchase.retry.succeeded",
+      "position": 11,
+      "scheduledGameId": "cee17c84-4627-4016-83e3-9b2900abeeb7",
+      "email": "demo-load-h3-46@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:37:40.136Z",
+      "type": "purchase.retry.succeeded",
+      "position": 11,
+      "scheduledGameId": "cee17c84-4627-4016-83e3-9b2900abeeb7",
+      "email": "demo-load-h4-44@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:41:00.122Z",
+      "type": "purchase.retry.succeeded",
+      "position": 12,
+      "scheduledGameId": "d3e46acb-b553-4149-88ea-41b5ee8f5cda",
+      "email": "demo-load-h1-7@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:41:00.282Z",
+      "type": "purchase.retry.succeeded",
+      "position": 12,
+      "scheduledGameId": "d3e46acb-b553-4149-88ea-41b5ee8f5cda",
+      "email": "demo-load-h1-22@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:41:00.973Z",
+      "type": "purchase.retry.succeeded",
+      "position": 12,
+      "scheduledGameId": "d3e46acb-b553-4149-88ea-41b5ee8f5cda",
+      "email": "demo-load-h1-74@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:41:01.575Z",
+      "type": "purchase.retry.succeeded",
+      "position": 12,
+      "scheduledGameId": "d3e46acb-b553-4149-88ea-41b5ee8f5cda",
+      "email": "demo-load-h2-52@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:41:02.312Z",
+      "type": "purchase.retry.succeeded",
+      "position": 12,
+      "scheduledGameId": "d3e46acb-b553-4149-88ea-41b5ee8f5cda",
+      "email": "demo-load-h3-17@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:41:02.516Z",
+      "type": "purchase.retry.succeeded",
+      "position": 12,
+      "scheduledGameId": "d3e46acb-b553-4149-88ea-41b5ee8f5cda",
+      "email": "demo-load-h3-59@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    },
+    {
+      "at": "2026-05-17T11:41:02.777Z",
+      "type": "purchase.retry.succeeded",
+      "position": 12,
+      "scheduledGameId": "d3e46acb-b553-4149-88ea-41b5ee8f5cda",
+      "email": "demo-load-h4-8@example.com",
+      "attempts": 2,
+      "previousCode": "INSUFFICIENT_FUNDS",
+      "previousMessage": "Kjøpet kunne ikke fullføres: Lommebok-operasjon kunne ikke fullføres. Prøv igjen."
+    }
+  ],
+  "failure": {
+    "message": "Round 12 had join/purchase failures",
+    "stack": "Error: Round 12 had join/purchase failures\n    at main (file:///Users/tobiashaugen/Projects/Spillorama-system/scripts/dev/goh-full-plan-run.mjs:180:13)\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)"
+  }
+}

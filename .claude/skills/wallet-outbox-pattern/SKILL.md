@@ -80,10 +80,10 @@ await pool.transaction(async (client) => {
   // 1. State-mutering
   await client.query("UPDATE app_wallet SET balance = ... WHERE id = ...");
   await client.query("INSERT INTO app_wallet_transactions ...");
-  
+
   // 2. Outbox-INSERT i SAMME TX
   await client.query("INSERT INTO app_wallet_outbox (event_type, payload, ...) ...");
-  
+
   // Atomisk commit eller rollback
 });
 
@@ -454,6 +454,17 @@ bash scripts/ops/setup-wallet-integrity-cron.sh install
 
 Se runbook for komplett konfig-referanse + FAQ.
 
+## Wallet transient-feil under GoH/load-test
+
+GoH 4x80-rerun 2026-05-17 viste at `WALLET_CIRCUIT_OPEN` ikke må mappes til `INSUFFICIENT_FUNDS`. Dette er to helt forskjellige operasjonelle signaler:
+
+- `INSUFFICIENT_FUNDS` = spilleren har faktisk ikke tilgjengelige midler.
+- `WALLET_CIRCUIT_OPEN`, `WALLET_SERIALIZATION_FAILURE`, `WALLET_API_TIMEOUT`, `WALLET_API_UNAVAILABLE`, `WALLET_DB_ERROR` = wallet-infrastruktur/backpressure/transient feil.
+
+`Game1TicketPurchaseService` skal bevare transient wallet-koder som purchase-feilkoder slik at runner/klient kan retry-e med riktig backoff. For circuit-open bruker `scripts/dev/goh-full-plan-run.mjs` lang backoff (`--wallet-circuit-retry-delay-ms`, default 32s) før nytt kjøp. Ikke "fiks" dette ved å øke spillerens saldo eller ved å mappe alt til insufficient funds.
+
+Regresjonstest: `apps/backend/src/game/Game1TicketPurchaseService.test.ts` dekker at åpen circuit breaker returnerer `WALLET_CIRCUIT_OPEN`.
+
 ## Kanonisk referanse
 
 `apps/backend/src/wallet/README.md` er autoritativ for modul-API. ADR-0004 (hash-chain) og ADR-0005 (outbox) er bindende design-beslutninger. Spør Tobias før endringer på BIN-761→767-fundamentet.
@@ -479,3 +490,4 @@ Se runbook for komplett konfig-referanse + FAQ.
 | 2026-05-14 | v1.2.0 — la til seksjon 11 om wallet-pool error-handler (Agent T). Informerer om at `attachPoolErrorHandler` beskytter wallet-mutasjoner mot backend-krasj på 57P01. Eksplisitt forbud mot `withDbRetry` på wallet-mutasjoner. |
 | 2026-05-14 | v1.3.0 — la til ADR-0023 MCP write-access policy. `wallet_accounts` + `wallet_entries` (faktiske tabellnavn, ikke `app_wallets`/`app_wallet_entries`) er beskyttet mot direct MCP-mutasjon i prod; alle korreksjoner går via append-only migration-PR. |
 | 2026-05-14 | v1.4.0 — la til ny seksjon "Wallet-integrity-watcher (OBS-10)". Cron-driven Q1 (balance-sum) + Q2 (hash-chain-link) sjekker, Linear-auto-issue ved brudd. Komplementært til nattlig `WalletAuditVerifier`. Aktivering disabled by default — Tobias aktiverer manuelt. |
+| 2026-05-17 | v1.5.0 — la til "Wallet transient-feil under GoH/load-test": `WALLET_CIRCUIT_OPEN` og andre transient wallet-koder må bevares, ikke maskeres som `INSUFFICIENT_FUNDS`. GoH-runner retry-er circuit-open med lang backoff. PITFALLS §2.12. |

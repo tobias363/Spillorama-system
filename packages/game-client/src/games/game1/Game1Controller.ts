@@ -9,7 +9,9 @@ import type {
   PatternWonPayload,
   BetRejectedEvent,
   WalletLossStateEvent,
+  AckResponse,
 } from "@spillorama/shared-types/socket-events";
+import type { RoomSnapshot } from "@spillorama/shared-types/game";
 import { telemetry } from "../../telemetry/Telemetry.js";
 // Tobias-bug 2026-05-14 (BUG-A defense-in-depth): wire LoadingOverlay soft-
 // fallback til Sentry breadcrumbs + info-message så stuck-perioder vises i
@@ -94,6 +96,12 @@ import {
  * blir mounted i det hele tatt og state henger i ENDED).
  */
 const END_SCREEN_AUTO_DISMISS_MS = 10_000;
+
+type JoinScheduledGameAckData = {
+  roomCode: string;
+  playerId: string;
+  snapshot: RoomSnapshot;
+};
 
 /**
  * Debug-logging-toggle (2026-05-11, Tobias-direktiv): når
@@ -798,11 +806,11 @@ class Game1Controller implements GameController {
       });
     }
     const joinResult = initialScheduledGameId
-      ? await socket.joinScheduledGame({
+      ? await this.joinScheduledGameWithRetry({
           scheduledGameId: initialScheduledGameId,
           hallId: this.deps.hallId,
           playerName: this.resolvePlayerName(),
-        })
+        }, "initial")
       : await socket.createRoom({
           hallId: this.deps.hallId,
           gameSlug: "bingo",
@@ -1649,11 +1657,11 @@ class Game1Controller implements GameController {
       `[Game1Controller] plan-advance: ${previous} → ${nextScheduledGameId}, re-joining scheduled game`,
     );
     try {
-      const result = await this.deps.socket.joinScheduledGame({
+      const result = await this.joinScheduledGameWithRetry({
         scheduledGameId: nextScheduledGameId,
         hallId: this.deps.hallId,
         playerName: this.resolvePlayerName(),
-      });
+      }, "delta");
       if (!result.ok || !result.data) {
         // Tobias-bug 2026-05-11: PLAYER_ALREADY_IN_ROOM betyr at klient
         // er allerede i samme socket-rom (initial-join via createRoom-
@@ -1709,6 +1717,61 @@ class Game1Controller implements GameController {
     } catch (err) {
       console.warn("[Game1Controller] re-join threw — beholder forrige room:", err);
     }
+  }
+
+  private async joinScheduledGameWithRetry(
+    payload: {
+      scheduledGameId: string;
+      hallId: string;
+      playerName: string;
+    },
+    context: "initial" | "delta",
+  ): Promise<AckResponse<JoinScheduledGameAckData>> {
+    let lastResult: AckResponse<JoinScheduledGameAckData> | null = null;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const result = await this.deps.socket.joinScheduledGame(payload);
+      lastResult = result;
+      if (result.ok || !this.isTransientJoinScheduledFailure(result)) {
+        if (result.ok && attempt > 1) {
+          console.info("[Game1Controller] joinScheduledGame retry succeeded", {
+            context,
+            scheduledGameId: payload.scheduledGameId,
+            attempt,
+          });
+        }
+        return result;
+      }
+      console.warn("[Game1Controller] joinScheduledGame transient failure — retrying", {
+        context,
+        scheduledGameId: payload.scheduledGameId,
+        attempt,
+        code: result.error?.code,
+      });
+      await this.sleep(350 * attempt);
+    }
+    return lastResult ?? {
+      ok: false,
+      error: {
+        code: "TIMEOUT",
+        message: "Kunne ikke joine planlagt runde.",
+      },
+    };
+  }
+
+  private isTransientJoinScheduledFailure(result: {
+    ok: boolean;
+    error?: { code?: string; message?: string };
+  }): boolean {
+    const message = result.error?.message ?? "";
+    return (
+      result.error?.code === "TIMEOUT" ||
+      result.error?.code === "NOT_CONNECTED" ||
+      message.includes("Server svarte ikke innen")
+    );
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   // ── State transitions ─────────────────────────────────────────────────

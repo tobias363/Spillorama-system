@@ -859,7 +859,12 @@ export class SpilloramaSocket {
    * Caller kan overstyre `clientRequestId` (e.g. for test-determinisme
    * eller for å gjenbruke samme key under en kjent retry-syklus).
    */
-  async markTicket(payload: { roomCode: string; number: number; clientRequestId?: string }): Promise<AckResponse<{ snapshot: RoomSnapshot }>> {
+  async markTicket(payload: {
+    roomCode: string;
+    number: number;
+    scheduledGameId?: string;
+    clientRequestId?: string;
+  }): Promise<AckResponse<{ snapshot: RoomSnapshot }>> {
     return this.emit(SocketEvents.TICKET_MARK, {
       ...payload,
       clientRequestId: payload.clientRequestId ?? generateClientRequestId(),

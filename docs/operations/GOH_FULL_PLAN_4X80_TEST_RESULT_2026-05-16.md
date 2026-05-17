@@ -1,10 +1,10 @@
 # GoH Full-Plan 4x80 Test Result — 2026-05-16
 
-**Status:** PASSED; follow-up fixes merged, re-run required
-**Utført av:** PM-AI / Codex  
-**Miljø:** Lokal backend på `http://localhost:4000`, lokal Postgres/Redis, Sentry/PostHog API snapshots, pilot-monitor  
-**Scope:** `demo-pilot-goh`, 4 testhaller x 80 spillere = 320 samtidige testspillere  
-**Plan:** Alle 13 Spill 1-planposisjoner  
+**Status:** PASSED baseline; follow-up P1-er er senere verifisert i final rerun
+**Utført av:** PM-AI / Codex
+**Miljø:** Lokal backend på `http://localhost:4000`, lokal Postgres/Redis, Sentry/PostHog API snapshots, pilot-monitor
+**Scope:** `demo-pilot-goh`, 4 testhaller x 80 spillere = 320 samtidige testspillere
+**Plan:** Alle 13 Spill 1-planposisjoner
 **Evidence:** `docs/evidence/20260516-goh-full-plan-run-4x80/`
 
 ## Sammendrag
@@ -15,12 +15,13 @@ Kjernen er positiv: alle 13 plan-spill fullførte, 320/320 spillere koblet til, 
 
 Dette var likevel ikke "ferdig robust" på testtidspunktet fordi live socket-markering feilet: `ticket:mark` ga `GAME_NOT_RUNNING` gjennom hele kjøringen, med 0 `markAcks`. Server-side draw/pattern-eval fullførte, men spillerklientens mark-path var P1.
 
-**Fix-status 2026-05-17:** Begge konkrete issues fra denne 4x80-runden er nå fikset og merget:
+**Fix-status 2026-05-17:** Sentry N+1-funnet ble fikset. `ticket:mark` krevde en rev2 etter rerun:
 
 - Sentry N+1 på `master/advance` og `master/resume` ble fikset med batch-load av catalog entries i PR #1562.
-- Scheduled Spill 1 `ticket:mark` `GAME_NOT_RUNNING` ble fikset med DB-backed scheduled validator før legacy `BingoEngine` fallback i PR #1563.
+- Scheduled Spill 1 `ticket:mark` rev1 i PR #1563 var ikke tilstrekkelig. 4x80-rerun 2026-05-17 viste fortsatt 0 `markAcks` og 12926 `GAME_NOT_RUNNING` i runde 1 fordi validatoren stolte på mutable `RoomSnapshot.scheduledGameId`.
+- Rev2-kontrakt: `draw:new.gameId` sendes som `ticket:mark.scheduledGameId`, og validatoren bruker eksplisitt scheduled-game DB-key. Se `docs/operations/GOH_FULL_PLAN_4X80_RERUN_RESULT_2026-05-17.md`.
 
-Dette betyr ikke at systemet er ferdig sertifisert som robust. Det betyr at alle kjente blokkere fra denne kjøringen har landed fixes. Neste beviskrav er ny 4x80-kjøring med observability snapshots der `ticket:mark failures = 0`, `markAcks > 0`, og ingen nye P0/P1 dukker opp i Sentry/PostHog/pilot-monitor.
+Final rerun 2026-05-17 verifiserte beviskravet som manglet her: 13/13 planposisjoner completed, 159418 `ticket:mark` acks, 0 `ticket:mark` failures, 0 join failures etter retry, 0 purchase failures etter retry og 0 pilot-monitor P0/P1. Se `docs/operations/GOH_FULL_PLAN_4X80_RERUN_RESULT_2026-05-17.md` og `docs/evidence/20260517-goh-full-plan-rerun-4x80-markretry/`.
 
 ## Nøkkeltall
 
@@ -89,11 +90,11 @@ Alle planposisjoner fullførte med 320 samtidige syntetiske spillere. Kjøp, rea
 
 `scripts/dev/goh-full-plan-run.mjs` hadde hardkodet `4 * 50 = 200` ticket assignments per runde. For 80 spillere per hall er riktig forventning 230 assignments per hall og 920 per runde. Runneren beregner nå forventningen fra faktisk `clients[]`.
 
-### 3. `ticket:mark` var P1 under testen — fixed etterpå i PR #1563
+### 3. `ticket:mark` var P1 under testen — PR #1563 rev1 holdt ikke ved rerun
 
 Alle runder fullfører server-side, men socket-eventen `ticket:mark` feiler med `GAME_NOT_RUNNING`. Dette er samme bug-klasse som 4x20 baseline, nå bekreftet ved 4x80.
 
-Root cause ble bekreftet: `ticket:mark` brukte legacy `BingoEngine.markNumber({ roomCode, playerId, number })`-path, mens scheduled Spill 1 rundestate eies av `Game1DrawEngineService` og DB. PR #1563 wirer scheduled Spill 1-markering mot riktig scheduled-game/status-kilde og har regresjonstester.
+Root cause ble bekreftet i to lag: `ticket:mark` brukte legacy `BingoEngine.markNumber({ roomCode, playerId, number })`-path, mens scheduled Spill 1 rundestate eies av `Game1DrawEngineService` og DB. PR #1563 wirer scheduled Spill 1-markering mot DB-validator, men rerun 2026-05-17 viste at validatoren også må få explicit `scheduledGameId` fra `draw:new.gameId`; mutable room-binding kan bli nullstilt ved canonical room reset.
 
 ### 4. N+1 i master advance/resume ble fanget av Sentry
 

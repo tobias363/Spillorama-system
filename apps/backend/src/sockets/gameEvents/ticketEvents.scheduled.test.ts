@@ -47,6 +47,7 @@ function makeContext(opts: {
     roomCode: string;
     playerId: string;
     number: number;
+    scheduledGameId?: string;
   }) => Promise<boolean>;
   markNumber?: () => Promise<void>;
 }): { socket: MockSocket; markCalls: { count: number }; register: () => void } {
@@ -121,7 +122,11 @@ function makeContext(opts: {
   };
 }
 
-function fireMark(socket: MockSocket, number: number): Promise<AckResponse<{ number: number; playerId: string }>> {
+function fireMark(
+  socket: MockSocket,
+  number: number,
+  overrides: Record<string, unknown> = {},
+): Promise<AckResponse<{ number: number; playerId: string }>> {
   return new Promise((resolve) => {
     socket.emit(
       "ticket:mark",
@@ -130,6 +135,7 @@ function fireMark(socket: MockSocket, number: number): Promise<AckResponse<{ num
         accessToken: "token",
         playerId: "p1",
         number,
+        ...overrides,
       },
       resolve,
     );
@@ -156,6 +162,34 @@ test("scheduled Spill 1 ticket:mark validates DB-backed snapshot and skips legac
   assert.deepEqual(markedEvents, [
     { roomCode: "BINGO_DEMO_PILOT_GOH", playerId: "p1", number: 39 },
   ]);
+});
+
+test("scheduled Spill 1 ticket:mark forwards explicit scheduledGameId to DB validator", async () => {
+  const seen: unknown[] = [];
+  const setup = makeContext({
+    authoritativeSnapshot: {
+      ...legacySnapshot(),
+      code: "BINGO_DEMO_PILOT_GOH",
+    },
+    validateScheduledGame1TicketMark: async (input) => {
+      seen.push(input);
+      return true;
+    },
+  });
+  setup.register();
+
+  const ack = await fireMark(setup.socket, 39, { scheduledGameId: "scheduled-game-1" });
+
+  assert.equal(ack.ok, true);
+  assert.deepEqual(seen, [
+    {
+      roomCode: "BINGO_DEMO_PILOT_GOH",
+      playerId: "p1",
+      number: 39,
+      scheduledGameId: "scheduled-game-1",
+    },
+  ]);
+  assert.equal(setup.markCalls.count, 0, "explicit scheduled path must not call legacy BingoEngine.markNumber");
 });
 
 test("scheduled Spill 1 ticket:mark rejects undrawn numbers without falling back to legacy", async () => {

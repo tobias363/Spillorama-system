@@ -70,6 +70,7 @@ export interface StopGameVoteAckData {
 
 export interface MarkPayload extends RoomActionPayload {
   number: number;
+  scheduledGameId?: string;
 }
 
 export interface ClaimPayload extends RoomActionPayload {

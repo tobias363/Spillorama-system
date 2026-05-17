@@ -58,7 +58,11 @@ import type { Pool } from "pg";
 import { DomainError } from "../errors/DomainError.js";
 import { IdempotencyKeys } from "./idempotency.js";
 import { logger as rootLogger } from "../util/logger.js";
-import type { WalletAdapter, WalletTransaction } from "../adapters/WalletAdapter.js";
+import {
+  WalletError,
+  type WalletAdapter,
+  type WalletTransaction,
+} from "../adapters/WalletAdapter.js";
 import type {
   AuditActorType,
   AuditLogService,
@@ -110,6 +114,14 @@ const PURCHASE_ALLOWED_STATUSES: readonly string[] = [
   "purchase_open",
   "ready_to_start",
 ];
+
+const PURCHASE_TRANSIENT_WALLET_ERROR_CODES = new Set([
+  "WALLET_CIRCUIT_OPEN",
+  "WALLET_SERIALIZATION_FAILURE",
+  "WALLET_API_TIMEOUT",
+  "WALLET_API_UNAVAILABLE",
+  "WALLET_DB_ERROR",
+]);
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -324,7 +336,11 @@ export class Game1TicketPurchaseService {
    *   - PURCHASE_CLOSED_FOR_HALL    — bingovert har trykket klar
    *   - INVALID_TICKET_SPEC         — farge/pris/størrelse feil
    *   - MISSING_AGENT               — agent-betaling uten agentUserId
-   *   - INSUFFICIENT_FUNDS          — wallet.debit kaster (wrapped)
+   *   - INSUFFICIENT_FUNDS          — faktisk for lav wallet-saldo
+   *   - WALLET_CIRCUIT_OPEN         — wallet-write circuit breaker er åpen
+   *   - WALLET_SERIALIZATION_FAILURE — transient concurrent wallet-write
+   *   - WALLET_API_TIMEOUT/UNAVAILABLE — ekstern wallet midlertidig nede
+   *   - WALLET_DEBIT_FAILED         — annen wallet-feil som ikke er saldo
    */
   async purchase(input: Game1TicketPurchaseInput): Promise<Game1TicketPurchaseResult> {
     this.validateInputShape(input);
@@ -409,9 +425,12 @@ export class Game1TicketPurchaseService {
         );
       } catch (err) {
         if (err instanceof DomainError) throw err;
+        if (err instanceof WalletError) {
+          throw toPurchaseWalletDomainError(err);
+        }
         const msg = err instanceof Error ? err.message : "ukjent wallet-feil";
         throw new DomainError(
-          "INSUFFICIENT_FUNDS",
+          "WALLET_DEBIT_FAILED",
           `Kjøpet kunne ikke fullføres: ${msg}`
         );
       }
@@ -1273,6 +1292,27 @@ function extractTicketCatalog(raw: unknown): TicketCatalogEntry[] {
 
 function sumTicketCount(spec: Game1TicketSpecEntry[]): number {
   return spec.reduce((n, e) => n + e.count, 0);
+}
+
+function toPurchaseWalletDomainError(err: WalletError): DomainError {
+  if (err.code === "INSUFFICIENT_FUNDS") {
+    return new DomainError(
+      "INSUFFICIENT_FUNDS",
+      "Ikke nok penger i wallet til å kjøpe billetter."
+    );
+  }
+
+  if (PURCHASE_TRANSIENT_WALLET_ERROR_CODES.has(err.code)) {
+    return new DomainError(
+      err.code,
+      `Kjøpet kunne ikke fullføres: ${err.message}`
+    );
+  }
+
+  return new DomainError(
+    "WALLET_DEBIT_FAILED",
+    `Kjøpet kunne ikke fullføres: ${err.message}`
+  );
 }
 
 /**
