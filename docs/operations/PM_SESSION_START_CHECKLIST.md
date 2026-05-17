@@ -107,10 +107,28 @@ less docs/operations/AI_BRANCH_COORDINATION_PROTOCOL.md
 Sjekk åpne PR-er og hvilken branch-lane du skal jobbe i:
 
 ```bash
-git fetch origin main
+git fetch origin main --prune
 git status -sb
 gh pr list --state open --json number,title,headRefName,isDraft,mergeStateStatus
 ```
+
+Hvis du starter ny branch fra main-worktree, må main først være eksakt på fersk `origin/main`:
+
+```bash
+git switch main
+git pull --ff-only origin main
+git switch -c codex/<scope>-YYYY-MM-DD   # eller claude/<scope>-YYYY-MM-DD
+```
+
+Hvis du allerede står på en Codex-/Claude-feature-branch, skal den rebases før første nye filendring:
+
+```bash
+git fetch origin main --prune
+git status -sb
+git rebase origin/main
+```
+
+Hvis branch allerede er pushet etter rebase: bruk `git push --force-with-lease`, aldri blind `--force`.
 
 Før du endrer filer, skriv/ha klart:
 
@@ -118,6 +136,7 @@ Før du endrer filer, skriv/ha klart:
 Branch lane: codex|claude
 Planned branch: <branch>
 Base: origin/main@<short-sha>
+Fresh-main sync: fetched + rebased|created-from-origin-main
 Shared-file intent: none | <fil-liste>
 Open PRs checked: yes
 Rebase needed before shared files: yes|no
@@ -132,6 +151,7 @@ mot fersk `origin/main`.
 - [ ] `AI_BRANCH_COORDINATION_PROTOCOL.md` lest
 - [ ] Åpne PR-er sjekket
 - [ ] Branch-lane valgt (`codex/...` eller `claude/...`)
+- [ ] Branch er fersk mot `origin/main` (`pull --ff-only`, `rebase origin/main` eller dokumentert merge)
 - [ ] Shared-file intent avklart før første filendring
 
 ### Trinn 1 — Generer live current-state-rapport

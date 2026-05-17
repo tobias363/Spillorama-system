@@ -1083,11 +1083,20 @@ To parallelle kjeder:
 ### 8.3 PR-flyt (PM-sentralisert)
 
 ```bash
-# 1. PM (deg) verifiserer state
+# 1. PM (deg) henter fersk main og verifiserer state
+git fetch origin main --prune
 git status
 
-# 2. Lag branch
+# Hvis du starter fra main-worktree: main må være fersk før branch lages
+git switch main
+git pull --ff-only origin main
+
+# 2. Lag branch fra fersk main
 git checkout -b fix/scope-topic-YYYY-MM-DD
+
+# Hvis du allerede står på en Codex-/Claude-feature-branch:
+git fetch origin main --prune
+git rebase origin/main
 
 # 3. Stage spesifikke filer (ALDRI git add -A)
 git add path/to/file.ts
@@ -1117,6 +1126,8 @@ git checkout main && git pull --rebase --autostash
 
 # 8. Gi Tobias hot-reload-restart-kommando (se §2.2)
 ```
+
+**Codex/Claude stale-branch-regel:** Når Codex eller Claude merger en PR, må den andre AI-en alltid kjøre `git fetch origin main --prune` + `git rebase origin/main` før den fortsetter på sin branch. Hvis branchen er delt og rebase vil rewrite andres arbeid, bruk `git merge origin/main` og dokumenter dette i PR-body. Lock-list PR-er skal også fylle ut `Fresh-main sync:` og `Shared-file rebase:` i PR-beskrivelsen, se [`docs/operations/AI_BRANCH_COORDINATION_PROTOCOL.md`](../operations/AI_BRANCH_COORDINATION_PROTOCOL.md).
 
 ### 8.4 CI-gates (alle blokkerende untatt rule 7 i danger.yml)
 
@@ -1567,6 +1578,7 @@ Last KUN når du redigerer kode i det domenet (lazy per-task).
 | 2026-05-09 | Initial — komplett PM-onboarding-playbook generert fra 6 parallelle research-agenter | PM-AI (Claude Opus 4.7 + 6 Explore-agenter) |
 | 2026-05-10 | Spillerklient-rebuild fase 1+2+3+4 fullført (5 PR-er merget i én sesjon). Pilot-blokker for spillerklient fjernet. Ny lærdom (§9 anti-mønstre): kjedede PR-er må rebases mot main mellom hvert squash-merge ELLER bruk combined PR for å unngå CONFLICTING-state. Se PM_HANDOFF_2026-05-10 §8. | PM-AI (Claude Opus 4.7) |
 | 2026-05-11 | Evolution-grade Bølge 1 + Bølge 2 levert (20 PR-er). ADR-0017 (fjerne daglig jackpot), ADR-0019 (Bølge 1 P0-konsistens), ADR-0020 (Bølge 2 utvidelses-fundament), ADR-0021 (master kan starte med 0 spillere). §2.2 standard restart-kommando byttet til `npm run dev:nuke` (Tobias-direktiv om "alle prosesser avsluttes"). | PM-AI (Claude Opus 4.7) |
+| 2026-05-17 | Presisert Codex/Claude stale-branch-regel: alltid `git fetch origin main --prune` + `git rebase origin/main` før videre arbeid etter at den andre AI-en har merget; lock-list PR-er må dokumentere `Fresh-main sync`. | PM-AI/Codex |
 
 ---
 
