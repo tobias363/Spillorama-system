@@ -20,6 +20,7 @@ import { stakeFromState } from "../logic/StakeCalculator.js";
 import { calculateMyRoundWinnings } from "../logic/WinningsCalculator.js";
 import { TicketGridHtml } from "../components/TicketGridHtml.js";
 import type { BuyPopupTicketConfig } from "../logic/lobbyTicketTypes.js";
+import { LoadingTransitionController } from "./LoadingTransitionController.js";
 
 /**
  * Redesign 2026-04-23 — explicit column-based layout so each region has
@@ -275,7 +276,22 @@ export class PlayScreen extends Container {
    * intervall).
    */
   private previousCatalogSlug: string | null = null;
-  private loadingTransitionDeadline: number | null = null;
+  /**
+   * Ekstern-konsulent-plan P0-3 (2026-05-17): loader-state deleget til
+   * `LoadingTransitionController` som eier både wall-clock-deadline og
+   * faktisk `setTimeout`. Pre-P0-3 var deadline kun en timestamp som
+   * ble sjekket inni `update()` — hvis serveren sluttet å sende
+   * `room:update` (frozen-state) satt loader-en evig i UI fordi
+   * sjekken aldri kjørte igjen.
+   *
+   * Med dedikert controller fyrer cleanup uavhengig av server-pulse.
+   * onTimeout-callbacken kaller `update(lastState)` slik at idle-mode
+   * faller tilbake til "next-game"/"waiting-master"/"closed" basert på
+   * lobby-state. Re-renderen er idempotent (autoShowBuyPopupDone gate-er
+   * auto-popup; deadline-arming krever RUNNING→non-RUNNING-overgang
+   * som ikke gjentas).
+   */
+  private readonly loadingTransition: LoadingTransitionController;
   private nextGameDisplayName = "Bingo";
   private topHudStatusMode: TopHudStatusMode = "next-game";
   private lastTopHudStatusSignature = "";
@@ -297,11 +313,43 @@ export class PlayScreen extends Container {
      * får default-oppførsel.
      */
     centerTopOptions: CenterTopOptions = {},
+    /**
+     * Ekstern-konsulent-plan P0-3 (2026-05-17): test-injection for
+     * loader-transition-timeout. Tester passer `setTimeoutFn`/
+     * `clearTimeoutFn` for deterministisk verifikasjon av at timeren
+     * fyrer cleanup uavhengig av server-pulse. Default bruker global
+     * setTimeout/clearTimeout med arrow-wrap mot `Illegal invocation`
+     * (samme mønster som AutoReloadOnDisconnect).
+     */
+    timerInjection: {
+      setTimeoutFn?: typeof setTimeout;
+      clearTimeoutFn?: typeof clearTimeout;
+      now?: () => number;
+    } = {},
   ) {
     super();
     this.audio = audio;
     this.screenW = screenWidth;
     this.screenH = screenHeight;
+    // P0-3 (2026-05-17): loader-transition deleget til dedikert
+    // controller. onTimeout-callback kaller `update(lastState)` slik
+    // at idle-mode re-evaluerer med ryddet deadline.
+    this.loadingTransition = new LoadingTransitionController({
+      timeoutMs: PlayScreen.LOADING_TRANSITION_TIMEOUT_MS,
+      onTimeout: () => {
+        if (this.lastState) {
+          // Re-call update er idempotent — RUNNING→non-RUNNING-grenen
+          // re-trigges ikke (previousGameStatus = lastState.gameStatus),
+          // auto-show-popup re-trigges ikke (autoShowBuyPopupDone er
+          // true etter første popup), og idle-mode re-evalueres med
+          // ryddet deadline.
+          this.update(this.lastState);
+        }
+      },
+      setTimeoutFn: timerInjection.setTimeoutFn,
+      clearTimeoutFn: timerInjection.clearTimeoutFn,
+      now: timerInjection.now,
+    });
 
     // Observability fix-PR 2026-05-13: track screen-mount slik at monitor /
     // dump-rapport ser når PlayScreen ble bygget. Komplementerer
@@ -608,10 +656,11 @@ export class PlayScreen extends Container {
       // til neste plan-item (catalogSlug er fortsatt det vi nettopp
       // spilte). Loader vises i maks LOADING_TRANSITION_TIMEOUT_MS før
       // vi faller tilbake til "Neste spill: <siste kjente>"-tekst.
-      // Backend-broadcast lander typisk innen ~50ms og rydder loader
-      // via `setNextScheduledGameSlug`-callbacken.
-      this.loadingTransitionDeadline =
-        Date.now() + PlayScreen.LOADING_TRANSITION_TIMEOUT_MS;
+      //
+      // Ekstern-konsulent-plan P0-3 (2026-05-17): controller eier
+      // både deadline og ekte setTimeout, slik at cleanup fyrer selv
+      // om serveren slutter å sende `room:update` (frozen-state).
+      this.loadingTransition.arm();
     }
     this.previousGameStatus = state.gameStatus;
 
@@ -661,7 +710,11 @@ export class PlayScreen extends Container {
       // missed (eksempelvis hvis serveren hopper rett fra ENDED til
       // RUNNING i samme room:update uten å oppdatere nextScheduledGame
       // først).
-      this.loadingTransitionDeadline = null;
+      //
+      // P0-3 (2026-05-17): controller rydder både deadline og
+      // setTimeout-handle slik at vi ikke får forsinket cleanup-
+      // callback når en ny runde er i gang.
+      this.loadingTransition.clear();
       if (state.lastDrawnNumber !== null) this.centerBall.setNumber(state.lastDrawnNumber);
     } else if (
       lobbyRunning &&
@@ -692,12 +745,15 @@ export class PlayScreen extends Container {
       // > next-game. Loader timeout-er etter LOADING_TRANSITION_TIMEOUT_MS
       // og faller tilbake til siste kjente "Neste spill"-tekst (samme
       // visning som før fixen).
-      const loadingActive =
-        this.loadingTransitionDeadline !== null &&
-        Date.now() < this.loadingTransitionDeadline;
-      if (loadingActive === false && this.loadingTransitionDeadline !== null) {
-        // Timeout truffet — rydd state så vi ikke holder en stale deadline.
-        this.loadingTransitionDeadline = null;
+      // P0-3 (2026-05-17): bruk controllerens `isActive()` som er
+      // wall-clock-sjekk + null-deadline. Hvis deadline har passert
+      // men timer ennå ikke fyrte (race i samme tick), `clear()`
+      // rydder begge slik at isActive returnerer false neste pass.
+      const loadingActive = this.loadingTransition.isActive();
+      if (!loadingActive && this.loadingTransition.getDeadline() !== null) {
+        // Deadline-timestamp henger igjen men er passert. Rydd både
+        // deadline og setTimeout-handle for konsistens.
+        this.loadingTransition.clear();
       }
       const idleMode:
         | "closed"
@@ -1037,7 +1093,8 @@ export class PlayScreen extends Container {
       // Slug endret — serveren har advancert. Clear loader umiddelbart
       // så CenterBall hopper rett til "Neste spill: <ny>" istedenfor å
       // vise loader til timeout.
-      this.loadingTransitionDeadline = null;
+      // P0-3 (2026-05-17): bruk controller-clear så også timer ryddes.
+      this.loadingTransition.clear();
     }
     this.previousCatalogSlug = next;
     // Re-evaluer idle-mode hvis vi er i ikke-running state og lastState
@@ -1054,8 +1111,7 @@ export class PlayScreen extends Container {
 
   /** Test-hook: er loader-vinduet aktivt? */
   isLoadingTransitionActive(): boolean {
-    if (this.loadingTransitionDeadline === null) return false;
-    return Date.now() < this.loadingTransitionDeadline;
+    return this.loadingTransition.isActive();
   }
 
   /**
@@ -1654,6 +1710,9 @@ export class PlayScreen extends Container {
   }
 
   destroy(): void {
+    // P0-3 (2026-05-17): cleanup loading-transition controller slik at
+    // timer ikke fyrer mot en destroyed PlayScreen-instans.
+    this.loadingTransition.destroy();
     this.blinkDiagnosticDispose?.();
     this.blinkDiagnosticDispose = null;
     this.leftInfo.stopCountdown();

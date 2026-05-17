@@ -2,7 +2,7 @@
 name: live-room-robusthet-mandate
 description: When the user/agent works with rom-arkitektur, socket-events, draw-tick, ticket-purchase, wallet-touch fra rom-events, eller pilot-gating-tiltak (R1-R12). Also use when they mention RoomAlertingService, SocketIdempotencyStore, EngineCircuitBreakerPort, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12, BIN-810, BIN-811, BIN-812, BIN-813, BIN-814, BIN-815, BIN-816, BIN-817, BIN-818, BIN-819, BIN-820, BIN-821, BIN-822, chaos-test, failover, klient-reconnect, idempotent socket-events, clientRequestId dedup, health-endpoint per rom, alerting Slack PagerDuty, DR-runbook, Evolution Gaming-grade oppetid, 99.95%, perpetual-loop leak, per-rom resource-isolation, stuck-game-recovery, monotonic stateVersion, RoomStateStore, SerializedRoomState, scheduledGameId-persistens, isHallShared-persistens, isTestHall-persistens, pendingMiniGame-persistens, spill3PhaseState-persistens, Redis-restart-recovery, ADR-0019, ADR-0020, ADR-0022. Make sure to use this skill whenever someone touches Spill 1/2/3 live-rom-arkitektur, robusthet-tiltak, eller pilot-gating — even if they don't explicitly ask for it.
 metadata:
-  version: 1.5.0
+  version: 1.6.0
   project: spillorama
 ---
 
@@ -357,6 +357,52 @@ Symptom: Spill 2 hukommelses-leak over 24t.
 - IKKE utvide til > 4 haller før R4/R6/R9 bestått
 - IKKE forhandl ned 99.95%-mål uten Tobias-godkjenning
 
+## PlayScreen loader-transition — alle wall-clock-deadlines må ha ekte timer
+
+**INVARIANT (P0-3, 2026-05-17):** Hver wall-clock-deadline i klient-koden som styrer UI-state SKAL ha en faktisk `setTimeout`-trigger ved siden av, ellers står state-en evig hvis update-loopen stopper.
+
+### Hvorfor
+
+`PlayScreen.update(state)` kjøres kun når `bridge.on("stateChanged")` fyres — typisk fra `room:update`-events. Hvis serveren slutter å sende `room:update` (frozen-state), kjører ikke update lenger. Wall-clock-sjekker inni update er da ubrukelige.
+
+Pre-P0-3 satt PlayScreen `loadingTransitionDeadline = Date.now() + 10_000` og sjekket `Date.now() < loadingTransitionDeadline` inni update(). Hvis update stoppet, sto "Forbereder neste spill"-loaderen evig.
+
+### Mønster — `LoadingTransitionController`
+
+Ekstrahert til egen klasse i `packages/game-client/src/games/game1/screens/LoadingTransitionController.ts`. Inkapsulerer:
+
+- Wall-clock-deadline (timestamp)
+- Faktisk `setTimeout`-handle
+- `arm()` setter begge (idempotent — cancler forrige først)
+- `clear()` rydder begge
+- `isActive()` for sjekker inni update
+- Timer fyrer `onTimeout`-callback → PlayScreen kaller `update(lastState)` for re-render
+- `destroy()` cancler timer + blokkerer videre arm
+
+### Når legge til lignende controller
+
+Hvis du legger til en ny klient-side state-maskin som:
+- Trigges av server-event
+- Har wall-clock-deadline for fallback/cleanup
+- Krever at UI re-rendererer ved deadline
+
+Følg samme pattern. IKKE bruk kun `Date.now()`-timestamp uten setTimeout. Test-injection (`setTimeoutFn`/`clearTimeoutFn`/`now`) gjør controlleren deterministisk testbar.
+
+### Hva du IKKE skal gjøre
+
+- Sett en deadline-timestamp uten matchende setTimeout
+- Stol på at "neste server-event vil rydde deadline" — frozen-state betyr at det aldri kommer
+- Plassere timer-logikk direkte i PlayScreen — det er Pixi-Container og lar seg ikke unit-teste uten mock
+
+### Re-render fra timer-callback må være idempotent
+
+`PlayScreen.onTimeout` kaller `update(lastState)`. Det er trygt fordi:
+- `previousGameStatus = lastState.gameStatus` ⇒ RUNNING→non-RUNNING-grenen re-trigges ikke
+- `autoShowBuyPopupDone = true` etter første popup ⇒ auto-show re-trigges ikke
+- Idle-mode-renderingen er ren funksjon av state + cleared deadline
+
+Hvis du legger til en ny state-mutering inni `update()`, vurder om den er idempotent ved samme input. Hvis ikke — flytt den ut av `update()`.
+
 ## Klient-side recovery-arkitektur — Tre kompletterende lag
 
 Spill 1-klienten har **tre uavhengige recovery-lag** som dekker forskjellige
@@ -494,5 +540,6 @@ For fremtidige PR-er som rører recovery:
 | 2026-05-13 | v1.1.0 — oppdatert R-status: R2/R3 PASSED, R4 infrastruktur merget, R11 circuit-breaker merget. Lagt til Bølge 1 + Bølge 2 + ADR-0019/0020/0021/0022. |
 | 2026-05-14 | v1.2.0 — lagt til "Etter-runde auto-return til lobby" seksjon (`MAX_PREPARING_ROOM_MS = 15s`-fallback) etter Tobias-rapport 2026-05-14 09:54 ("Forbereder rommet..."-spinner hang evig). |
 | 2026-05-14 | v1.3.0 — la til "Synthetic bingo-runde-test (R4-precursor)" seksjon under pilot-gating. Småskala-test som ALLTID må PASSE pre-pilot. Doc: `docs/operations/SYNTHETIC_BINGO_TEST_RUNBOOK.md`. |
+| 2026-05-17 | v1.6.0 — la til "PlayScreen loader-transition — alle wall-clock-deadlines må ha ekte timer" seksjon. Dokumenterer `LoadingTransitionController`-mønsteret (P0-3) og hvorfor klient-side wall-clock-deadlines må kombineres med faktisk `setTimeout`-trigger for å overleve frozen-state hvor `update()`-loopen stopper. |
 | 2026-05-17 | v1.5.0 — la til "Klient-side recovery-arkitektur — Tre kompletterende lag" seksjon. Dokumenterer `LiveRoomRecoverySupervisor` (P0-2) sin tier-tabell, conditions for at hver tier fyrer, invarianter ved endringer, og hvorfor lagene må forbli uavhengige. Inkluderer `triggerImmediateReload()`-delegasjons-API for å dele reload-loop-counter mellom Lag 1 (disconnect) og Lag 3 (supervisor tier 3). |
 | 2026-05-17 | v1.4.0 — la til "Redis room-state-serialisering — INVARIANT" seksjon. Hardened `SerializedRoomState`/`SerializedGameState` til å persistere `scheduledGameId`, `isHallShared`, `isTestHall`, `pendingMiniGame` (RoomState) + `spill3PhaseState`, `isPaused`/pause-felter, `participatingPlayerIds`, `patterns`/`patternResults`, `miniGame`/`jackpot`, `isTestGame` (GameState). Pre-hardening gikk disse tapt på Redis-restart — scheduled Spill 1 mistet binding, GoH-rom mistet isHallShared og ga HALL_MISMATCH til ikke-master-haller. |
