@@ -47,7 +47,7 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§1 Compliance & Regulatorisk](#1-compliance--regulatorisk) | 9 | 2026-05-10 |
 | [§2 Wallet & Pengeflyt](#2-wallet--pengeflyt) | 11 | 2026-05-14 |
 | [§3 Spill 1, 2, 3 arkitektur](#3-spill-1-2-3-arkitektur) | 19 | 2026-05-15 |
-| [§4 Live-rom-state](#4-live-rom-state) | 15 | 2026-05-17 |
+| [§4 Live-rom-state](#4-live-rom-state) | 16 | 2026-05-17 |
 | [§5 Git & PR-flyt](#5-git--pr-flyt) | 16 | 2026-05-15 |
 | [§6 Test-infrastruktur](#6-test-infrastruktur) | 25 | 2026-05-17 |
 | [§7 Frontend / Game-client](#7-frontend--game-client) | 47 | 2026-05-16 |
@@ -57,7 +57,7 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§11 Agent-orkestrering](#11-agent-orkestrering) | 26 | 2026-05-17 |
 | [§12 DB-resilience](#12-db-resilience) | 1 | 2026-05-14 |
 
-**Total:** 191 entries (per 2026-05-17)
+**Total:** 192 entries (per 2026-05-17)
 
 ---
 
@@ -1450,6 +1450,79 @@ PagerDuty-regler som gates på `status: degraded|down` vil nå utløse ved misma
 - `apps/backend/src/routes/__tests__/publicGameHealth.test.ts` — 11 nye regresjons-tester + 2 oppdaterte integration
 - `.claude/skills/live-room-robusthet-mandate/SKILL.md` v1.7.0 — eskalerings-tabell + invariant
 - Ekstern-konsulent-plan 2026-05-17 P0-4
+
+### §4.14 — Klient-side `fetch()` uten AbortController-timeout fryser polling under nett-degradering
+
+**Severity:** P0 (pilot-blokker — recovery)
+**Oppdaget:** 2026-05-17 (ekstern-konsulent-review)
+**Status:** LØST 2026-05-17
+**Symptom:** `Game1LobbyStateBinding.fetchOnce()` kalte `fetch(url, { credentials: "omit" })` uten timeout. Under nett-degradering (DNS-hang, server-suspend, proxy-stall) kunne fetches henge i ubestemt tid. Med `pollIntervalMs=3000` og uten timeout kunne pending fetches stable seg opp i bakgrunnen.
+
+**Pre-fix kode** (`LobbyStateBinding.ts:248-263`):
+```ts
+private async fetchOnce(): Promise<void> {
+  if (this.destroyed) return;
+  try {
+    const res = await fetch(url, { credentials: "omit" });
+    // ... aldri timeout — kan henge for evig
+  } catch (err) {
+    console.warn("[LobbyStateBinding] HTTP-fetch feilet", err);
+  }
+}
+```
+
+**Konsekvenser:**
+
+- Hengende fetches lekker browser-sockets (én per call). Etter timer kan klient nå browser-grense for parallelle requests.
+- Faktisk-aktuelle state-updates forsinket bak en kø av hengende calls — lobby viser feil "Neste spill"-tekst.
+- Klient-state forblir stale; brukeren ser ikke at server har advancert plan.
+- Ved `stop()` (PlayScreen destroy / Game1Controller cleanup) ble in-flight fetches IKKE aborted — callbacks kunne fyre mot destroyed instans og enten kaste i applyState eller forsøke å mutere null state.
+
+**Root cause:** Klient-side polling-loop med ingen timeout. JavaScript-fetch-API har ingen built-in timeout — det MÅ implementeres via AbortController + setTimeout.
+
+**Fix (2026-05-17):**
+
+`Game1LobbyStateBinding` har nå AbortController-basert timeout:
+
+1. Constructor tar nye optional opts: `fetchTimeoutMs` (default 5000), `setTimeoutFn`, `clearTimeoutFn`, `AbortControllerCtor` (test-injection).
+2. Hver `fetchOnce()` oppretter ny AbortController, armer setTimeout som abort-er hvis fetchen henger lenger enn `fetchTimeoutMs`.
+3. Ny `fetchOnce()` abort-er forrige in-flight controller hvis den fortsatt kjører — hindrer at hengende fetches stacker seg opp under nett-degradering.
+4. `stop()` abort-er in-flight controller — ingen callbacks etter cleanup.
+5. AbortError logges stille (forventet ved timeout eller superseded), andre feil logges via `console.warn`.
+
+**Default 5000 ms** er valgt fordi:
+- Lengre enn `pollIntervalMs` (3 sek) → normale fetches får alltid tid til å fullføre
+- Kortere enn typisk browser-timeout (30-120 sek) → vi gir opp før browseren ville gjort det
+- Test-injection lar tester verifisere ulike thresholds deterministisk
+
+**Prevention (skill-doc invariant):**
+
+`.claude/skills/live-room-robusthet-mandate/SKILL.md` v1.8.0 har ny seksjon "HTTP fetches i klient MÅ ha AbortController-timeout". Etablerer regelen: alle `fetch()`-kall i klient som er i polling-loop eller har lifecycle-binding SKAL ha AbortController-timeout. Default 5000 ms eller kortere enn polling-intervall.
+
+**Test-coverage (10 nye tester):**
+
+`LobbyStateBinding.fetchTimeout.test.ts`:
+- fetch får signal fra AbortController
+- timeout abort-er hengende fetch etter fetchTimeoutMs
+- timeout-callback kaller controller.abort()
+- stop() abort-er in-flight fetch
+- ny fetchOnce abort-er forrige in-flight
+- AbortError logges stille
+- Ikke-AbortError logges som ekte feil
+- clearTimeout kalles ved success
+- Default fetchTimeoutMs er 5000 ms
+- Custom fetchTimeoutMs overstyrer default
+
+**Eksisterende 27 LobbyStateBinding-tester uendret** — backward-compat bevart.
+
+**Related:**
+
+- `packages/game-client/src/games/game1/logic/LobbyStateBinding.ts` — implementasjon
+- `packages/game-client/src/games/game1/logic/LobbyStateBinding.fetchTimeout.test.ts` — 10 nye regresjons-tester
+- `packages/game-client/src/games/game1/logic/LobbyStateBinding.test.ts` — 11 eksisterende tester (urørt)
+- `packages/game-client/src/games/game1/logic/LobbyStateBinding.fetchResilience.test.ts` — 16 eksisterende tester (urørt)
+- `.claude/skills/live-room-robusthet-mandate/SKILL.md` v1.8.0 — fetch-timeout-invariant
+- Ekstern-konsulent-plan 2026-05-17 P0-5
 
 ---
 

@@ -2,7 +2,7 @@
 name: live-room-robusthet-mandate
 description: When the user/agent works with rom-arkitektur, socket-events, draw-tick, ticket-purchase, wallet-touch fra rom-events, eller pilot-gating-tiltak (R1-R12). Also use when they mention RoomAlertingService, SocketIdempotencyStore, EngineCircuitBreakerPort, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12, BIN-810, BIN-811, BIN-812, BIN-813, BIN-814, BIN-815, BIN-816, BIN-817, BIN-818, BIN-819, BIN-820, BIN-821, BIN-822, chaos-test, failover, klient-reconnect, idempotent socket-events, clientRequestId dedup, health-endpoint per rom, alerting Slack PagerDuty, DR-runbook, Evolution Gaming-grade oppetid, 99.95%, perpetual-loop leak, per-rom resource-isolation, stuck-game-recovery, monotonic stateVersion, RoomStateStore, SerializedRoomState, scheduledGameId-persistens, isHallShared-persistens, isTestHall-persistens, pendingMiniGame-persistens, spill3PhaseState-persistens, Redis-restart-recovery, ADR-0019, ADR-0020, ADR-0022. Make sure to use this skill whenever someone touches Spill 1/2/3 live-rom-arkitektur, robusthet-tiltak, eller pilot-gating — even if they don't explicitly ask for it.
 metadata:
-  version: 1.7.0
+  version: 1.8.0
   project: spillorama
 ---
 
@@ -357,6 +357,112 @@ Symptom: Spill 2 hukommelses-leak over 24t.
 - IKKE utvide til > 4 haller før R4/R6/R9 bestått
 - IKKE forhandl ned 99.95%-mål uten Tobias-godkjenning
 
+## HTTP fetches i klient MÅ ha AbortController-timeout
+
+**INVARIANT (P0-5, 2026-05-17):** Alle `fetch()`-kall i klient-kode som
+kjører i et polling-loop eller har lifecycle-binding (start/stop) SKAL
+ha AbortController-timeout. Default 5000 ms eller kortere enn
+polling-intervall.
+
+### Hvorfor
+
+Pre-P0-5 hadde `Game1LobbyStateBinding.fetchOnce()` ingen timeout:
+
+```ts
+// Pre-fix — kan henge i ubestemt tid
+const res = await fetch(url, { credentials: "omit" });
+```
+
+Under nett-degradering (DNS-hang, server-suspend, sjelden men reell)
+kunne fetches henge. Med `pollIntervalMs=3000` og uten timeout kunne
+pending fetches stable seg opp:
+- Sockets lekker (én per hengende fetch)
+- Faktisk-aktuelle state-updates forsinket bak en kø av hengende calls
+- Klient-state forblir stale; lobby viser feil neste spill
+
+### Mønster
+
+```ts
+const controller = new this.AbortControllerCtor();
+this.inFlightAbortController = controller;
+
+const timeoutHandle = this.setTimeoutFn(() => {
+  controller.abort();
+}, this.fetchTimeoutMs);
+
+try {
+  const res = await fetch(url, { signal: controller.signal });
+  // ...
+} catch (err) {
+  if (err.name === "AbortError") {
+    // Forventet — timeout eller superseded
+  } else {
+    console.warn(err);
+  }
+} finally {
+  this.clearTimeoutFn(timeoutHandle);
+  if (this.inFlightAbortController === controller) {
+    this.inFlightAbortController = null;
+  }
+}
+```
+
+### Race-safety: ny fetch abort-er forrige in-flight
+
+Når en ny `fetchOnce()` starter mens forrige fortsatt er in-flight,
+abort vi forrige først. Dette hindrer at hengende fetches stacker seg
+opp under nett-degradering.
+
+```ts
+if (this.inFlightAbortController) {
+  this.inFlightAbortController.abort();
+}
+```
+
+### stop() / destroy() MÅ abort-e in-flight
+
+For å unngå callbacks (success/error) etter cleanup:
+
+```ts
+stop(): void {
+  if (this.inFlightAbortController) {
+    this.inFlightAbortController.abort();
+    this.inFlightAbortController = null;
+  }
+  // ...
+}
+```
+
+### Test-injection
+
+Constructor tar `setTimeoutFn`/`clearTimeoutFn`/`AbortControllerCtor`
+for deterministisk testing. Bruk arrow-wrap-mønsteret:
+
+```ts
+this.setTimeoutFn = opts.setTimeoutFn ??
+  (((handler, timeout, ...args) =>
+    setTimeout(handler, timeout, ...args)) as unknown as typeof setTimeout);
+```
+
+Uten arrow-wrap kaster native setTimeout `Illegal invocation` når den
+er bound til en klasse-instans (samme problem som
+`AutoReloadOnDisconnect.ts:114-120`).
+
+### Default-verdier
+
+- `fetchTimeoutMs`: 5000 (5 sek). Lengre enn `pollIntervalMs` (3s) så
+  normale fetches alltid får tid til å fullføre.
+- `AbortControllerCtor`: `globalThis.AbortController` (universelt
+  støttet i browser + Node 16+).
+
+### Hvor å sjekke ved nye fetches
+
+Hver gang du legger til en ny `fetch()` i klient-kode:
+1. Er den i et polling-loop? → MÅ ha AbortController-timeout
+2. Er den i en lifecycle-binding med start/stop? → MÅ abort-e i stop()
+3. Trigges den fra en user-action (én gang)? → AbortController kan
+   vurderes men ikke krav
+
 ## Health-endpoint må reflektere mismatch-tilstand i aggregert status
 
 **INVARIANT (P0-4, 2026-05-17):** `/api/games/spill[1-3]/health` sin `status`-felt SKAL eskalere til `degraded`/`down` ved mismatch-tilstander. Hvis mismatchStatus er ikke-ok men `status` er `ok`, har ops-dashbord ingen måte å se inkonsistensen.
@@ -597,6 +703,7 @@ For fremtidige PR-er som rører recovery:
 | 2026-05-13 | v1.1.0 — oppdatert R-status: R2/R3 PASSED, R4 infrastruktur merget, R11 circuit-breaker merget. Lagt til Bølge 1 + Bølge 2 + ADR-0019/0020/0021/0022. |
 | 2026-05-14 | v1.2.0 — lagt til "Etter-runde auto-return til lobby" seksjon (`MAX_PREPARING_ROOM_MS = 15s`-fallback) etter Tobias-rapport 2026-05-14 09:54 ("Forbereder rommet..."-spinner hang evig). |
 | 2026-05-14 | v1.3.0 — la til "Synthetic bingo-runde-test (R4-precursor)" seksjon under pilot-gating. Småskala-test som ALLTID må PASSE pre-pilot. Doc: `docs/operations/SYNTHETIC_BINGO_TEST_RUNBOOK.md`. |
+| 2026-05-17 | v1.8.0 — la til "HTTP fetches i klient MÅ ha AbortController-timeout" seksjon. Dokumenterer P0-5-fixet hvor `Game1LobbyStateBinding.fetchOnce()` nå har 5s timeout via AbortController og kanselerer in-flight ved race. Pre-fix kunne hengende fetches stacke seg opp under nett-degradering. |
 | 2026-05-17 | v1.7.0 — la til "Health-endpoint må reflektere mismatch-tilstand i aggregert status" seksjon. Dokumenterer P0-4-fixet hvor `deriveStatus()` nå tar `mismatchStatus` som input slik at `unexpected_engine_room` → down og andre mismatches → degraded. Pre-fix returnerte alltid `ok` ved mismatch — ops-dashbord så grønt selv ved brutt engine-state. |
 | 2026-05-17 | v1.6.0 — la til "PlayScreen loader-transition — alle wall-clock-deadlines må ha ekte timer" seksjon. Dokumenterer `LoadingTransitionController`-mønsteret (P0-3) og hvorfor klient-side wall-clock-deadlines må kombineres med faktisk `setTimeout`-trigger for å overleve frozen-state hvor `update()`-loopen stopper. |
 | 2026-05-17 | v1.5.0 — la til "Klient-side recovery-arkitektur — Tre kompletterende lag" seksjon. Dokumenterer `LiveRoomRecoverySupervisor` (P0-2) sin tier-tabell, conditions for at hver tier fyrer, invarianter ved endringer, og hvorfor lagene må forbli uavhengige. Inkluderer `triggerImmediateReload()`-delegasjons-API for å dele reload-loop-counter mellom Lag 1 (disconnect) og Lag 3 (supervisor tier 3). |
