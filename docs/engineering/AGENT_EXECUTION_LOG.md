@@ -59,6 +59,45 @@ Hver entry har struktur:
 
 ## Entries (newest first)
 
+### 2026-05-17 — PM-AI: Fase B.2 — cleanup-merged-branches.sh (1 476 lokale + 999 remote branches)
+
+**Branch:** `claude/fase-b2-cleanup-merged-branches-2026-05-17`
+**Agent type:** PM-AI (selv, ikke spawnet ekstern agent)
+**Trigger:** Tobias spurte etter Fase B-cleanup om det er mer som bør slettes for å holde repoet rent. Audit avdekket 1 476 lokale + 999 remote branches uten cleanup-mekanisme.
+
+**Inputs:**
+- Audit: `git branch | wc -l` = 1 476, `git branch -r | wc -l` = 999, `gh pr list --state merged --limit 2000 | jq length` = 1 328
+- `git branch --merged origin/main` finner kun 4 av 999 remote-branches — squash-merge edge case rammer her (PR-er squash-merget endrer commit-SHA, så `--merged` finner ikke disse)
+- 8 åpne PR-er må preserveres + recovery/backup/restore/rescue-mønstre
+
+**Outputs:**
+1. **`scripts/cleanup-merged-branches.sh`** (ny, ~330 linjer) — klassifiserer hver branch: PROTECTED/CURRENT/WORKTREE/OPEN-PR/MERGED/SQUASH-MERGED/FRESH/UNMERGED. DRY-RUN BY DEFAULT, `--apply` interaktiv, `--yes` batch, `--remote`/`--all` scope, `--json` maskinlesbar. Bash 3.2-kompatibel.
+2. **`docs/engineering/PITFALLS_LOG.md`** ny §11.27 dokumenterer fallgruven + cleanup-løsningen. Index sync: §11 26→27, total 186→187.
+3. **`docs/operations/PM_SESSION_END_CHECKLIST.md`** Trinn 10 utvidet med branch-cleanup-kommandoer + kategorier.
+4. **`.claude/skills/pm-orchestration-pattern/SKILL.md`** v1.8.0 → v1.9.0.
+5. **`docs/engineering/AGENT_EXECUTION_LOG.md`** denne entry.
+
+**Empirisk verifisert (DRY-RUN 2026-05-17):**
+- Lokale: 1 331 scannet → 532 SQUASH-MERGED safe + 271 FRESH + 391 WORKTREE + 2 OPEN-PR + 13 PROTECTED + 1 CURRENT + 121 UNMERGED
+- Remote: 916 scannet → 4 MERGED + 804 SQUASH-MERGED safe + 16 FRESH + 8 OPEN-PR + 7 PROTECTED + 77 UNMERGED
+- **Total eligible:** 1 340 branches trygt slettbare (532 lokal + 808 remote)
+
+**Læring:** Squash-merge er den dominante merge-strategien i Spillorama. `git merge-base --is-ancestor` kan IKKE brukes alene for squash-merget detection — må krysses mot `gh pr list --state merged --json headRefName`. Cache 2 000 merged PRs ved oppstart for å unngå per-branch gh-call.
+
+**PR:** under-konstruksjon
+
+**Shared-file rebase:** origin/main@de2552222
+**Shared files touched:**
+- `scripts/cleanup-merged-branches.sh` (ny — Fase B.2)
+- `docs/engineering/PITFALLS_LOG.md` (append-only: §11.27 + index sync; potensielt conflict med pending fix-up PR #1561 sin §11.27 — renumber til §11.28 ved rebase hvis fix-up merges først)
+- `docs/operations/PM_SESSION_END_CHECKLIST.md` (utvidet Trinn 10)
+- `.claude/skills/pm-orchestration-pattern/SKILL.md` (v1.8.0 → v1.9.0)
+- `docs/engineering/AGENT_EXECUTION_LOG.md` (append-only entry)
+
+**Coordination note:** Ingen Codex-PR rører samme filer. Codex aktiv på `codex/goh-80-load-test-2026-05-16` (forskjellig scope). Ingen workflow-/package.json-endringer. Fix-up PR #1561 (bash 3.2 mapfile-fix) er CONFLICTING og venter — denne PR baseres direkte på origin/main (de2552222), ikke på #1561.
+
+---
+
 ### 2026-05-15 — PM/audit-agent: Access-/approval-matrise før required reviews
 
 **Branch:** `codex/access-approval-matrix`
