@@ -5487,3 +5487,78 @@ PlayScreen extends Pixi Container → kan ikke instansieres i unit-test uten Pix
 
 - P0-5: `LobbyStateBinding.fetchOnce` AbortController med 5s timeout (separat PR)
 - P0-6: GoH 4x80 rerun med invariant-verifikasjon for V2 (Redis-roundtrip + frozen-state-test)
+
+### 2026-05-17 — PM-AI/Claude: LobbyStateBinding AbortController-timeout (P0-5 fra ekstern-konsulent-plan)
+
+**Agent-type:** PM/self-implementation (ekstern-konsulent-rolle)
+**Branch:** `claude/lobby-fetch-timeout-2026-05-17`
+**Worktree:** `/Users/tobiashaugen/Projects/Spillorama-system/.claude/worktrees/naughty-ride-0807dd`
+**Scope:** `Game1LobbyStateBinding.fetchOnce()` kalte `fetch()` uten AbortController-timeout. Under nett-degradering (DNS-hang, server-suspend) kunne fetches henge i ubestemt tid, lekke browser-sockets, og forsinke faktisk-aktuelle state-updates. Plan-fil P0-5.
+
+**Kodeendringer:**
+
+- `packages/game-client/src/games/game1/logic/LobbyStateBinding.ts`:
+  - 3 nye optional constructor-opts: `fetchTimeoutMs` (default 5000), `setTimeoutFn`/`clearTimeoutFn`/`AbortControllerCtor` (test-injection med arrow-wrap mot "Illegal invocation")
+  - Nytt private field `inFlightAbortController: AbortController | null`
+  - `fetchOnce()`: abort-er forrige in-flight controller FØR ny fetch, armer setTimeout med abort-callback, passer `controller.signal` til fetch, rydder timeout i finally, nuller controller hvis fortsatt vår
+  - AbortError logges stille (forventet ved timeout eller superseded); andre feil logges som warn
+  - `stop()`: abort-er in-flight controller før destroyed=true så ingen callbacks fyrer mot destroyed instans
+- `packages/game-client/src/games/game1/logic/LobbyStateBinding.fetchTimeout.test.ts` (ny, 327 linjer, 10 tester):
+  - fetch får signal fra AbortController
+  - timeout abort-er hengende fetch etter fetchTimeoutMs
+  - timeout-callback kaller controller.abort()
+  - stop() abort-er in-flight fetch
+  - ny fetchOnce abort-er forrige in-flight (race-safety)
+  - AbortError logges stille
+  - Ikke-AbortError logges som ekte feil
+  - clearTimeout kalles ved success
+  - Default fetchTimeoutMs er 5000 ms
+  - Custom fetchTimeoutMs overstyrer default
+
+**Tester kjørt:**
+
+- `npm --prefix packages/game-client run check` — TypeScript strict pass
+- `npm --prefix packages/game-client run test -- --run LobbyStateBinding.fetchTimeout` — 10/10 pass (553ms)
+- `npm --prefix packages/game-client run test -- --run LobbyStateBinding` — 37/37 pass (10 nye + 11 + 16 eksisterende)
+- `npm --prefix packages/game-client run test -- --run` — 1402 pass (var 1392, +10 nye), 2 pre-existing fails (spillerklientRebuildE2E trafikklys — IKKE forårsaket av denne PR)
+
+**Hvorfor 5000 ms default:**
+
+- Lengre enn `pollIntervalMs` (3 sek) → normale fetches får alltid tid til å fullføre
+- Kortere enn typisk browser-timeout (30-120 sek) → vi gir opp før browseren ville gjort det
+- Test-injection lar tester verifisere ulike thresholds deterministisk
+
+**Dokumentasjon oppdatert:**
+
+- `.claude/skills/live-room-robusthet-mandate/SKILL.md` v1.8.0 — ny seksjon "HTTP fetches i klient MÅ ha AbortController-timeout":
+  - Etablerer invariant: alle polling-loop / lifecycle-bound fetches SKAL ha AbortController-timeout
+  - Default 5000 ms eller kortere enn polling-intervall
+  - Race-safety: ny fetch abort-er forrige in-flight
+  - stop()/destroy() MÅ abort-e in-flight
+  - Test-injection-mønster med arrow-wrap (samme som AutoReloadOnDisconnect/LiveRoomRecoverySupervisor/LoadingTransitionController)
+- `docs/engineering/PITFALLS_LOG.md` §4.14: full forklaring + fix-detaljer + prevention. Indeks oppdatert (§4: 15→16, total: 191→192).
+
+**Coordination block (worktree-routine 2026-05-17):**
+
+- Fresh-main sync: `git fetch origin main --prune` + `git switch -c claude/lobby-fetch-timeout-2026-05-17 origin/main` ved a40d4d2e (post-PR-#1572-merge).
+- Branch lane: claude.
+- Worktree: ephemeral `.claude/worktrees/naughty-ride-0807dd`.
+- Shared files touched: `docs/engineering/PITFALLS_LOG.md` (append-only §4.14 + indeks), `docs/engineering/AGENT_EXECUTION_LOG.md` (denne entry), `.claude/skills/live-room-robusthet-mandate/SKILL.md` (knowledge-protokoll v1.8.0).
+- Coordination note: PR #1572 (P0-4) merget før jeg startet — ingen overlap.
+
+**Læring:**
+
+- JavaScript-fetch-API har INGEN built-in timeout — det MÅ implementeres via AbortController + setTimeout. Standard fallgruve i pure HTTP-polling-kode.
+- Race-safety: når polling-intervall er kortere enn potensiell fetch-tid, MÅ ny fetch abort-e forrige. Uten dette stacker calls seg opp.
+- AbortError er IKKE en ekte feil — den signaliserer at vi bevisst avbrøt en operation. Logging av AbortError som warn forsøpler konsollen.
+- Test-injection-mønsteret med `setTimeoutFn`/`AbortControllerCtor` er gjenbruksverdig på tvers av controllers. Samme pattern brukt i alle 4 P0-tiltak.
+- Pre-existing test-failures (spillerklientRebuildE2E.test.ts trafikklys) er konsistent på tvers av alle P0-PR-er — ikke regresjon, ikke i scope for noen av disse fixene.
+
+**Neste steg fra plan:**
+
+- P0-6: GoH 4x80 rerun med invariant-verifikasjon for V2 (Redis-roundtrip + frozen-state-test)
+
+Dette er siste P0 før ekstern-konsulent-planen er ferdig levert. Etter merge av P0-6:
+- 6/6 P0 implementert
+- 2-ukers verifikasjons-fase (V1-V8) kan starte
+- "Alltid live"-godkjenning forutsetter V1-V8 bestått

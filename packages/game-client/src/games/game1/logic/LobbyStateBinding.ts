@@ -68,6 +68,37 @@ export interface LobbyStateBindingOptions {
    * Default: 3000 (matcher `LobbyFallback`-pattern).
    */
   pollIntervalMs?: number;
+  /**
+   * Ekstern-konsulent-plan P0-5 (2026-05-17): timeout-grense for hver
+   * HTTP-fetch (ms). Etter timeout abortes fetchen via AbortController
+   * og polling-loopen fortsetter ved neste intervall.
+   *
+   * Pre-P0-5 hadde `fetchOnce()` ingen timeout. Under nett-degradering
+   * (DNS-hang, server-suspend, sjelden men reell) kunne fetches henge
+   * i ubestemt tid. Med pollIntervalMs=3000 og uten timeout kunne
+   * pending fetches stable seg opp i bakgrunnen, lekke sockets og
+   * forsinke faktisk-aktuelle state-updates.
+   *
+   * Default: 5000 (5 sek). Lengre enn pollIntervalMs (3s) så normale
+   * fetches alltid får tid til å fullføre. Test-injection via
+   * `setTimeoutFn`/`AbortControllerCtor` gjør timeout-en deterministisk
+   * testbar.
+   */
+  fetchTimeoutMs?: number;
+  /**
+   * Test-injection (P0-5 2026-05-17): override `setTimeout`. Default
+   * bruker arrow-wrap-pattern mot "Illegal invocation" (samme som
+   * AutoReloadOnDisconnect/LiveRoomRecoverySupervisor).
+   */
+  setTimeoutFn?: typeof setTimeout;
+  /** Test-injection: override `clearTimeout`. */
+  clearTimeoutFn?: typeof clearTimeout;
+  /**
+   * Test-injection: override `AbortController`-constructor. Default
+   * `globalThis.AbortController`. Tester kan injecte en custom impl
+   * for å verifisere abort-signal-propagering.
+   */
+  AbortControllerCtor?: typeof AbortController;
 }
 
 /**
@@ -86,11 +117,21 @@ export class Game1LobbyStateBinding {
   private readonly socket: SpilloramaSocket;
   private readonly apiBaseUrl: string;
   private readonly pollIntervalMs: number;
+  private readonly fetchTimeoutMs: number;
+  private readonly setTimeoutFn: typeof setTimeout;
+  private readonly clearTimeoutFn: typeof clearTimeout;
+  private readonly AbortControllerCtor: typeof AbortController;
 
   private currentState: Spill1LobbyState | null = null;
   private listeners: Set<LobbyStateChangeListener> = new Set();
   private socketUnsub: (() => void) | null = null;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
+  /**
+   * P0-5 (2026-05-17): track in-flight fetch slik at vi kan abort den
+   * ved destroy() eller hvis en ny fetchOnce-call starter mens
+   * forrige fortsatt henger (race-safety mot stacking).
+   */
+  private inFlightAbortController: AbortController | null = null;
   private destroyed = false;
 
   constructor(opts: LobbyStateBindingOptions) {
@@ -100,6 +141,18 @@ export class Game1LobbyStateBinding {
       opts.apiBaseUrl ??
       (typeof window !== "undefined" ? window.location.origin : "");
     this.pollIntervalMs = opts.pollIntervalMs ?? 3_000;
+    this.fetchTimeoutMs = opts.fetchTimeoutMs ?? 5_000;
+    // Arrow-wrap for å unngå "Illegal invocation" ved native bind
+    // (samme mønster som AutoReloadOnDisconnect/LiveRoomRecoverySupervisor).
+    this.setTimeoutFn =
+      opts.setTimeoutFn ??
+      (((handler: TimerHandler, timeout?: number, ...args: unknown[]) =>
+        setTimeout(handler, timeout, ...args)) as unknown as typeof setTimeout);
+    this.clearTimeoutFn =
+      opts.clearTimeoutFn ??
+      (((handle?: number) =>
+        clearTimeout(handle)) as unknown as typeof clearTimeout);
+    this.AbortControllerCtor = opts.AbortControllerCtor ?? AbortController;
   }
 
   /**
@@ -138,6 +191,16 @@ export class Game1LobbyStateBinding {
     if (this.pollTimer) {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
+    }
+    // P0-5 (2026-05-17): abort any in-flight fetch slik at vi ikke
+    // får callbacks (success eller error) etter destroy.
+    if (this.inFlightAbortController) {
+      try {
+        this.inFlightAbortController.abort();
+      } catch {
+        /* safe to ignore */
+      }
+      this.inFlightAbortController = null;
     }
     if (this.socketUnsub) {
       this.socketUnsub();
@@ -247,9 +310,38 @@ export class Game1LobbyStateBinding {
 
   private async fetchOnce(): Promise<void> {
     if (this.destroyed) return;
+
+    // P0-5 (2026-05-17): abort eventuell forrige in-flight fetch FØR vi
+    // starter ny. Hindrer at hengende fetches stacker seg opp under
+    // nett-degradering. Hvis forrige er ferdig, er abort() no-op.
+    if (this.inFlightAbortController) {
+      try {
+        this.inFlightAbortController.abort();
+      } catch {
+        /* abort() kan kaste i edge-cases; safe to ignore */
+      }
+    }
+
+    const controller = new this.AbortControllerCtor();
+    this.inFlightAbortController = controller;
+
+    // P0-5: hard timeout via setTimeout som abort-er fetchen hvis den
+    // henger lenger enn fetchTimeoutMs. Uten dette kunne fetch henge i
+    // ubestemt tid under DNS-feil / server-suspend.
+    const timeoutHandle = this.setTimeoutFn(() => {
+      try {
+        controller.abort();
+      } catch {
+        /* abort kan kaste hvis allerede aborted */
+      }
+    }, this.fetchTimeoutMs);
+
     try {
       const url = `${this.apiBaseUrl}/api/games/spill1/lobby?hallId=${encodeURIComponent(this.hallId)}`;
-      const res = await fetch(url, { credentials: "omit" });
+      const res = await fetch(url, {
+        credentials: "omit",
+        signal: controller.signal,
+      });
       if (!res.ok) return;
       const body = (await res.json()) as
         | { ok: true; data: Spill1LobbyState }
@@ -258,7 +350,26 @@ export class Game1LobbyStateBinding {
         this.applyState(body.data);
       }
     } catch (err) {
-      console.warn("[LobbyStateBinding] HTTP-fetch feilet", err);
+      // AbortError er ikke en ekte feil — den er enten timeout-trigger
+      // eller superseded-by-next-fetch. Logg på debug-nivå så vi ikke
+      // forsøpler konsollen ved normal polling-rytme.
+      const isAbort =
+        err instanceof Error && err.name === "AbortError";
+      if (isAbort) {
+        // Stillere logg — abort er forventet i to scenarier:
+        // 1. Timeout etter fetchTimeoutMs
+        // 2. Ny fetchOnce startet før denne ble ferdig
+        // Begge er trygge tilstander; ingen state corruption.
+      } else {
+        console.warn("[LobbyStateBinding] HTTP-fetch feilet", err);
+      }
+    } finally {
+      this.clearTimeoutFn(timeoutHandle);
+      // Bare null ut hvis det fortsatt er VÅR controller — en ny
+      // fetchOnce kan ha startet og overskrevet feltet.
+      if (this.inFlightAbortController === controller) {
+        this.inFlightAbortController = null;
+      }
     }
   }
 
