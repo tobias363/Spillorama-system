@@ -5046,3 +5046,45 @@ Trygt slettbart UTEN data-tap: 2 + 5 + 240 worktrees + 52 stashes (kategorisk + 
 - Observability må være API-frozen før/midt/etter, ikke bare "monitor kjører". Uten sammenlignbar preflight ville Sentry N+1 blitt muntlig mistanke.
 - Test-harness skal skaleres fra data, ikke fra baseline-antakelser. 4x20 hadde 200 tickets/runde; 4x80 har 920/runde.
 - Server-side completed er ikke nok for live-room robusthet. Så lenge `ticket:mark` har 0 acks, kan man ikke si at spillerklientens live-markering er Evolution-grade.
+
+### 2026-05-17 — PM-AI/Codex: Scheduled Spill 1 `ticket:mark` P1-fix
+
+**Agent-type:** PM/self-implementation
+**Branch:** `codex/fix-scheduled-ticket-mark-2026-05-17`
+**Scope:** Tobias ba om å gjennomføre fix for eneste åpne P1 etter GoH 4x80: scheduled Spill 1 `ticket:mark` feilet med `GAME_NOT_RUNNING` selv om server-side draw/pattern-eval fullførte.
+
+**Evidence brukt før kode:**
+- GoH 4x80 evidence: 164495 mark failures, 0 acks, runner otherwise `passed`.
+- `.claude/skills/spill1-master-flow/SKILL.md` v1.22.0, `.claude/skills/goh-master-binding/SKILL.md`, `.claude/skills/live-room-robusthet-mandate/SKILL.md`.
+- Kodegjennomgang av `apps/backend/src/sockets/gameEvents/ticketEvents.ts`, `Game1ScheduledRoomSnapshot.ts`, `Game1DrawEngineService.ts` og `app_game1_ticket_assignments` migration.
+- Agent-contract evidence: `docs/evidence/20260517-pm-ai-codex---scheduled-ticket-mark-p1-f/contract.md`.
+
+**Root cause:**
+- Generic `ticket:mark` socket-handler kalte alltid legacy `BingoEngine.markNumber()`.
+- Scheduled Spill 1 har autoritativ running-state i `Game1DrawEngineService` + DB, ikke i legacy `BingoEngine.currentGame`.
+- Resultat: legacy-engine returnerte `GAME_NOT_RUNNING` for alle live marks i scheduled GoH-runder.
+
+**Kodeendringer:**
+- Ny `apps/backend/src/game/Game1ScheduledTicketMarkService.ts`.
+- `apps/backend/src/sockets/gameEvents/deps.ts` fikk optional `validateScheduledGame1TicketMark` dep.
+- `apps/backend/src/sockets/gameEvents/ticketEvents.ts` prøver scheduled validator først og faller kun tilbake til `BingoEngine.markNumber()` når validator returnerer `false` (non-scheduled/ad-hoc rom).
+- `apps/backend/src/index.ts` wirer `Game1ScheduledTicketMarkService` inn i socket deps.
+
+**Designvalg:**
+- Bruker `RoomSnapshot.scheduledGameId` fra in-memory room-binding for å identifisere scheduled Spill 1 raskt.
+- Validerer mot DB-backed scheduled state: status `running`/`paused`, drawn number, player finnes, og player assignments inneholder tallet.
+- Cacher draw-state og per-player ticket numbers. Full `enrichScheduledGame1RoomSnapshot()` per mark er eksplisitt unngått fordi GoH 4x80 kan gi hundretusener av marks.
+- Mark muterer ikke scheduled DB; `Game1DrawEngineService.drawNext()` eier `markings_json`. Socket-mark er live player ack/UI-flow.
+
+**Dokumentasjon:**
+- `.claude/skills/spill1-master-flow/SKILL.md` v1.23.0.
+- `docs/engineering/PITFALLS_LOG.md` §6.23 oppdatert fra ÅPEN til LØST.
+
+**Tester/verifikasjon:**
+- `LOG_LEVEL=warn npx tsx --test src/sockets/gameEvents/ticketEvents.scheduled.test.ts src/game/Game1ScheduledTicketMarkService.test.ts` — 8/8 pass.
+- `npm run check --workspace apps/backend` — TypeScript `tsc --noEmit` pass.
+
+**Læring:**
+- Scheduled Spill 1 socket-events må eksplisitt velge scheduled-engine/DB-path først; legacy `BingoEngine` kan fortsatt være transport-rom, men er ikke autoritativ for running-state.
+- "Server-side round completed" er nødvendig, men ikke tilstrekkelig live-room bevis. Player socket-flow må ha egne counters (`markAcks`, `markFailures`) i load-test-evidence.
+- Fixer for high-frequency socket-events må vurderes som performance-paths fra start; korrekt full-snapshot-validering kan være funksjonelt riktig men operasjonelt feil ved 4x80/1000-spiller skala.

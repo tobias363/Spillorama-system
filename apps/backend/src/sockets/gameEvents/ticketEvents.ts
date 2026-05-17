@@ -66,7 +66,14 @@ export function registerTicketEvents(ctx: SocketContext): void {
         throw new DomainError("INVALID_INPUT", "number mangler.");
       }
       const number = Number(payload.number);
-      await engine.markNumber({ roomCode, playerId, number });
+      const handledByScheduledGame1 = await deps.validateScheduledGame1TicketMark?.({
+        roomCode,
+        playerId,
+        number,
+      }) ?? false;
+      if (!handledByScheduledGame1) {
+        await engine.markNumber({ roomCode, playerId, number });
+      }
       // Private ack event — no room-fanout.
       socket.emit("ticket:marked", { roomCode, playerId, number });
       ackSuccess(callback, { number, playerId });

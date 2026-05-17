@@ -25,7 +25,7 @@ Antall skills totalt: **25** — varsel hvis noen mangler scope-header:
 | `bong-design` | 12 | 12 | `packages/game-client/src/games/game1/components/BingoTicketHtml.ts`<br>`packages/game-client/src/games/game1/components/BingoTicketTripletHtml.ts`<br>`packages/game-client/src/games/game1/components/TicketGridHtml.ts`<br>`packages/game-client/src/games/game1/components/BingoTicketHtml.test.ts`<br>_(+8 more)_ |
 | `buy-popup-design` | 6 | 6 | `packages/game-client/src/games/game1/components/Game1BuyPopup.ts`<br>`packages/game-client/src/games/game1/components/Game1BuyPopup.test.ts`<br>`packages/game-client/src/games/game1/components/Game1BuyPopup.lossState.test.ts`<br>`packages/game-client/src/games/game1/components/Game1BuyPopup.displayName.test.ts`<br>_(+2 more)_ |
 | `candy-iframe-integration` | 6 | 6 | `apps/backend/src/integration/externalGameWallet.ts`<br>`apps/backend/src/integration/externalGameWallet.test.ts`<br>`apps/backend/src/routes/game.ts`<br>`apps/backend/public/web/spillvett.js`<br>_(+2 more)_ |
-| `casino-grade-testing` | 4 | 667 | `infra/chaos-tests/**`<br>`apps/backend/src/__tests__/chaos/**`<br>`apps/backend/src/**/*.test.ts`<br>`tests/e2e/**` |
+| `casino-grade-testing` | 4 | 669 | `infra/chaos-tests/**`<br>`apps/backend/src/__tests__/chaos/**`<br>`apps/backend/src/**/*.test.ts`<br>`tests/e2e/**` |
 | `customer-unique-id` | 9 | 9 | `apps/backend/src/agent/UniqueIdService.ts`<br>`apps/backend/src/agent/UniqueIdStore.ts`<br>`apps/backend/src/agent/__tests__/UniqueIdStore.postgres.test.ts`<br>`apps/backend/src/agent/__tests__/UniqueIdService.test.ts`<br>_(+5 more)_ |
 | `database-migration-policy` | 3 | 159 | `apps/backend/migrations/**`<br>`apps/backend/src/scripts/migrate.ts`<br>`render.yaml` |
 | `debug-hud-gating` | 3 | 14 | `packages/game-client/src/games/game1/Game1Controller.ts`<br>`packages/game-client/src/games/game1/debug/**`<br>`packages/game-client/src/games/game1/debug/activation.ts` |
@@ -37,7 +37,7 @@ Antall skills totalt: **25** — varsel hvis noen mangler scope-header:
 | `pm-orchestration-pattern` | 17 | 39 | `BACKLOG.md`<br>`docs/operations/PM_HANDOFF_*.md`<br>`docs/operations/PM_KNOWLEDGE_CONTINUITY_V2.md`<br>`docs/engineering/PM_*.md`<br>_(+13 more)_ |
 | `preview-pages-protection` | 6 | 1 | `packages/game-client/src/bong-design/`<br>`packages/game-client/src/kjopsmodal-design/`<br>`packages/game-client/src/premie-design/`<br>`packages/game-client/src/dev-overview/`<br>_(+2 more)_ |
 | `spill1-center-top-design` | 9 | 6 | `packages/game-client/src/games/game1/components/CenterTopPanel.ts`<br>`packages/game-client/src/games/game1/components/CenterTopPanel.test.ts`<br>`packages/game-client/src/games/game1/__tests__/no-backdrop-filter-regression.test.ts`<br>`packages/game-client/src/games/game1/components/PatternMiniGrid.ts`<br>_(+5 more)_ |
-| `spill1-master-flow` | 20 | 129 | `apps/backend/src/game/Game1*`<br>`apps/backend/src/game/MasterActionService.ts`<br>`apps/backend/src/game/GamePlanRunService.ts`<br>`apps/backend/src/game/GamePlanRunCleanupService.ts`<br>_(+16 more)_ |
+| `spill1-master-flow` | 20 | 131 | `apps/backend/src/game/Game1*`<br>`apps/backend/src/game/MasterActionService.ts`<br>`apps/backend/src/game/GamePlanRunService.ts`<br>`apps/backend/src/game/GamePlanRunCleanupService.ts`<br>_(+16 more)_ |
 | `spill2-perpetual-loop` | 8 | 51 | `apps/backend/src/game/Game2*`<br>`apps/backend/src/game/Spill2*`<br>`apps/backend/src/game/PerpetualRound*`<br>`apps/backend/src/jobs/game2AutoDrawTick.ts`<br>_(+4 more)_ |
 | `spill3-phase-state-machine` | 9 | 23 | `apps/backend/src/game/Game3*`<br>`apps/backend/src/game/Spill3*`<br>`apps/backend/src/jobs/game3AutoDrawTick.ts`<br>`apps/backend/src/routes/adminSpill3Config.ts`<br>_(+5 more)_ |
 | `spinngo-databingo` | 5 | 9 | `apps/backend/src/game/ledgerGameTypeForSlug.ts`<br>`apps/backend/src/game/ledgerGameTypeForSlug.test.ts`<br>`apps/backend/src/game/ledgerGameTypeForSlug.distribution.test.ts`<br>`apps/backend/src/game/ComplianceLedgerOverskudd.ts`<br>_(+1 more)_ |
@@ -162,7 +162,7 @@ Antall skills totalt: **25** — varsel hvis noen mangler scope-header:
 - `apps/backend/src/**/*.test.ts`
 - `tests/e2e/**`
 
-**Filer matchet i HEAD:** 667
+**Filer matchet i HEAD:** 669
 
 ### `customer-unique-id`
 
@@ -357,7 +357,7 @@ Antall skills totalt: **25** — varsel hvis noen mangler scope-header:
 - `apps/admin-web/src/pages/agent-portal/Spill1*.ts`
 - `apps/admin-web/src/pages/games/master/Game1MasterConsole.ts`
 
-**Filer matchet i HEAD:** 129
+**Filer matchet i HEAD:** 131
 
 ### `spill2-perpetual-loop`
 

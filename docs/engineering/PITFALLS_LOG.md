@@ -1,7 +1,7 @@
 # Spillorama Pitfalls Log — kumulativ fallgruve-katalog
 
 **Status:** Autoritativ. Alle fallgruver oppdaget i prosjektet samles her.
-**Sist oppdatert:** 2026-05-16
+**Sist oppdatert:** 2026-05-17
 **Eier:** PM-AI (vedlikeholdes ved hver agent-sesjon + hver PR-merge med learning)
 
 > **Tobias-direktiv 2026-05-10:** *"Når agenter jobber og du verifiserer arbeidet deres er det ekstremt viktig at alt blir dokumentert og at fallgruver blir forklart slik at man ikke går i de samme fellene fremover. Det er virkelig det som vil være forskjellen på om vi får et fungerende system eller er alltid bakpå og krangler med gammel kode/funksjoner."*
@@ -49,7 +49,7 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§3 Spill 1, 2, 3 arkitektur](#3-spill-1-2-3-arkitektur) | 19 | 2026-05-15 |
 | [§4 Live-rom-state](#4-live-rom-state) | 10 | 2026-05-16 |
 | [§5 Git & PR-flyt](#5-git--pr-flyt) | 16 | 2026-05-15 |
-| [§6 Test-infrastruktur](#6-test-infrastruktur) | 25 | 2026-05-16 |
+| [§6 Test-infrastruktur](#6-test-infrastruktur) | 25 | 2026-05-17 |
 | [§7 Frontend / Game-client](#7-frontend--game-client) | 47 | 2026-05-16 |
 | [§8 Doc-disiplin](#8-doc-disiplin) | 8 | 2026-05-15 |
 | [§9 Konfigurasjon / Environment](#9-konfigurasjon--environment) | 10 | 2026-05-16 |
@@ -57,7 +57,7 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§11 Agent-orkestrering](#11-agent-orkestrering) | 26 | 2026-05-17 |
 | [§12 DB-resilience](#12-db-resilience) | 1 | 2026-05-14 |
 
-**Total:** 186 entries (per 2026-05-16)
+**Total:** 186 entries (per 2026-05-17)
 
 ---
 
@@ -1785,17 +1785,22 @@ curl -s "http://localhost:4000/api/_dev/debug/round-replay/<scheduled-game-id>?t
 
 **Severity:** P1 (spillerklient/live-markering kan være ute av sync med scheduled-game)
 **Oppdaget:** 2026-05-16 (GoH full-plan runner, clean rerun)
+**Status:** LØST 2026-05-17 (scheduled mark-validator før legacy fallback)
 **Symptom:** Alle 13 runder fullfører server-side med draws, pattern-eval, tickets og purchases, men socket-klientene får `ticket.mark.failures` med kode `GAME_NOT_RUNNING` og melding `Ingen aktiv runde i rommet.` Runnerens per-runde `Marks` står 0.
-**Root cause:** Ikke ferdig isolert. Mest sannsynlig mismatch mellom scheduled Spill 1 room/status-resolveren i `ticket:mark` socket-path og den faktiske scheduled-game/room-code som draw-engine kjører. Dette påvirket ikke server-side completion i testen, men kan påvirke live spilleropplevelse og må behandles som separat P1.
-**Fix:** Åpen. Neste debug må sammenligne faktisk spillerklient og runner-socket: room join, active game lookup, `currentScheduledGameId`, `roomCode`, og socket-handlerens statuskilde under running-state.
+**Root cause:** Generic socket-handler `ticketEvents.ts` kalte `BingoEngine.markNumber()` for alle rom. Scheduled Spill 1 har ikke autoritativ running game i legacy `BingoEngine`; state eies av `Game1DrawEngineService` + DB (`app_game1_scheduled_games`, `app_game1_draws`, `app_game1_ticket_assignments`). Derfor returnerte legacy-engine `GAME_NOT_RUNNING` selv mens scheduled-engine fullførte draw/pattern-eval korrekt.
+**Fix:** `ticket:mark` prøver først `Game1ScheduledTicketMarkService.validate()`. Service bruker in-memory `RoomSnapshot.scheduledGameId` for å identifisere scheduled Spill 1 og validerer mot DB-backed scheduled state: status `running`/`paused`, tallet er trukket, spilleren finnes i rommet, og spillerens assignments inneholder tallet. Kun non-scheduled rom faller tilbake til `BingoEngine.markNumber()`.
 **Prevention:**
 - Full-plan-runner skal fortsette å logge mark-failures som anomalies selv når runden fullfører.
 - Ikke bruk kun server-side draw completion som bevis for at live-spiller-markering er frisk.
-- Når fix implementeres, legg inn regresjonstest der scheduled Spill 1 `ticket:mark` lykkes mens plan-run kjører via GoH.
+- Aldri kall `BingoEngine.markNumber()` direkte for scheduled Spill 1.
+- Aldri hydrer full `enrichScheduledGame1RoomSnapshot()` per `ticket:mark`; GoH 4x80 kan produsere hundretusener av marks og full snapshot per mark blir N+1/load-regresjon.
+- Regresjonstester: `apps/backend/src/game/Game1ScheduledTicketMarkService.test.ts` og `apps/backend/src/sockets/gameEvents/ticketEvents.scheduled.test.ts`.
 **Related:**
 - `docs/evidence/20260516-goh-full-plan-run/goh-full-plan-run-2026-05-16T15-52-08-891Z.json`
 - `docs/operations/GOH_FULL_PLAN_TEST_RESULT_2026-05-16.md`
 - `scripts/dev/goh-full-plan-run.mjs`
+- `apps/backend/src/game/Game1ScheduledTicketMarkService.ts`
+- `apps/backend/src/sockets/gameEvents/ticketEvents.ts`
 
 ### §6.24 — Full-plan runner må ikke hardkode 4x20 ticket-forventning
 
@@ -4298,6 +4303,7 @@ Hver fix-PR auto-deleter sin branch på origin men ikke lokal worktree. Hver gan
 | 2026-05-16 | Lagt til §11.25 — Agent-contract bygd men ikke adoptert i daglig flyt (0/35 high-risk spawns). Fase A av ADR-0024 layered defense: pre-spawn agent-contract-gate (shadow-mode 2026-05-16 → 2026-05-23, hard-fail tidligst 2026-05-24) + bypass-telemetri-script + ukentlig cron. Validerer `Contract-ID:` + `Contract-path:` for high-risk PR-er, eller `[agent-contract-not-applicable:]` bypass. 29 + 26 tester. | PM-AI (Fase A — pre-spawn evidence gate) |
 | 2026-05-17 | Lagt til §11.26 — Worktree+stash baggage akkumulerer (400 worktrees / 178 stashes). Fase B av ADR-0024 follow-up: cleanup-scripts med safety-verdict per item, DRY-RUN BY DEFAULT, `--apply` for interaktiv sletting. Worktree-script identifiserer SAFE/LOCKED-S/ORPHANED/UNSAFE_*/CURRENT/MAIN. Stash-script kategoriserer AUTO-BACKUP/AGENT-LEFTOVER/MERGED-BRANCH/FRESH/EXPLICIT-KEEP/UNCLEAR. Bash 3.2-kompatibel. | PM-AI (Fase B — lokal cleanup-scripts) |
 | 2026-05-16 | Lagt til §4.8 og §6.24 fra GoH 4x80 full-plan test: Sentry N+1 på master advance/resume ble fikset med catalog batch-load, og full-plan runner ble gjort skala-dynamisk for 80 spillere per hall. | PM-AI (GoH 4x80 load-test + observability) |
+| 2026-05-17 | Oppdatert §6.23 fra ÅPEN til LØST: scheduled Spill 1 `ticket:mark` bruker nå DB-backed scheduled validator med cache før legacy `BingoEngine` fallback. Dokumenterer anti-mønsteret "server-side completion ≠ frisk live player socket-flow". | PM-AI (scheduled ticket:mark P1 fix) |
 | 2026-05-16 | Lagt til §9.10 — Render External Database URL er full-access, ikke read-only. Opprettet `spillorama_pm_readonly` og koblet observability-runner til `postgres-readonly.env`. | PM-AI (DB observability read-only role) |
 | 2026-05-16 | Lagt til §7.38 — BuyPopup-design må separere test-låst DOM-kontrakt fra visuell mockup. Header én linje, `Du kjøper` nederst i ticket-wrapper, no-scroll-verifisering i visual-harness. Total 117→118 entries. | PM-AI (BuyPopup design parity) |
 | 2026-05-16 | Lagt til §7.39 — Ticket-grid top-gap må måles fra faktisk top-HUD, ikke hardkodes. `PlayScreen` plasserer nå bongene `16px` under målt `top-group-wrapper`-bunn og reposerer etter status/endring. Total 118→119 entries. | PM-AI (Spill 1 bong vertical spacing) |

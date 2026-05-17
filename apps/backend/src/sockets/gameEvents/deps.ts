@@ -276,4 +276,16 @@ export interface GameEventsDeps {
    * instead of returning the bare BingoEngine transport-room snapshot.
    */
   getAuthoritativeRoomSnapshot?: (roomCode: string) => Promise<RoomSnapshot>;
+  /**
+   * Scheduled Spill 1 validates high-frequency `ticket:mark` against the
+   * DB-backed scheduled round without hydrating a full room snapshot per mark.
+   * Returns true when the room is scheduled Spill 1 and the mark was handled;
+   * returns false for legacy/ad-hoc rooms so ticketEvents can fall back to
+   * BingoEngine.markNumber().
+   */
+  validateScheduledGame1TicketMark?: (input: {
+    roomCode: string;
+    playerId: string;
+    number: number;
+  }) => Promise<boolean>;
 }

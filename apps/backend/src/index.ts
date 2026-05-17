@@ -209,6 +209,7 @@ import type {
   Game1ArmedTicketSpecEntry,
 } from "./game/Game1ArmedToPurchaseConversionService.js";
 import { Game1DrawEngineService } from "./game/Game1DrawEngineService.js";
+import { Game1ScheduledTicketMarkService } from "./game/Game1ScheduledTicketMarkService.js";
 import { buildVariantConfigFromGameConfigJson } from "./game/Game1DrawEngineHelpers.js";
 import { Game1PotService } from "./game/pot/Game1PotService.js";
 import { Game1MiniGameOrchestrator } from "./game/minigames/Game1MiniGameOrchestrator.js";
@@ -2641,6 +2642,11 @@ const game1DrawEngineService = new Game1DrawEngineService({
   lobbyBroadcaster: spill1LobbyBroadcaster,
 });
 game1MasterControlService.setDrawEngine(game1DrawEngineService);
+const game1ScheduledTicketMarkService = new Game1ScheduledTicketMarkService({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+  engine,
+});
 // GAME1_SCHEDULE PR 4d.4: inject ticket-purchase-service slik at stopGame()
 // kan kalle refundAllForGame() POST-commit for automatisk refund ved master-
 // stop. Late-binding fordi ticketPurchaseService konstrueres etter
@@ -5577,6 +5583,7 @@ const registerGameEvents = createGameEventHandlers({
   // resync.
   getCurrentStateVersion: (roomCode) => roomStateVersionStore.current(roomCode),
   getAuthoritativeRoomSnapshot,
+  validateScheduledGame1TicketMark: (input) => game1ScheduledTicketMarkService.validate(input),
 });
 
 // BIN-498 + BIN-503: TV-display socket handlers.
