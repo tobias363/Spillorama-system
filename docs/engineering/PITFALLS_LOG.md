@@ -47,7 +47,7 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§1 Compliance & Regulatorisk](#1-compliance--regulatorisk) | 9 | 2026-05-10 |
 | [§2 Wallet & Pengeflyt](#2-wallet--pengeflyt) | 11 | 2026-05-14 |
 | [§3 Spill 1, 2, 3 arkitektur](#3-spill-1-2-3-arkitektur) | 19 | 2026-05-15 |
-| [§4 Live-rom-state](#4-live-rom-state) | 13 | 2026-05-17 |
+| [§4 Live-rom-state](#4-live-rom-state) | 14 | 2026-05-17 |
 | [§5 Git & PR-flyt](#5-git--pr-flyt) | 16 | 2026-05-15 |
 | [§6 Test-infrastruktur](#6-test-infrastruktur) | 25 | 2026-05-17 |
 | [§7 Frontend / Game-client](#7-frontend--game-client) | 47 | 2026-05-16 |
@@ -57,7 +57,7 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§11 Agent-orkestrering](#11-agent-orkestrering) | 26 | 2026-05-17 |
 | [§12 DB-resilience](#12-db-resilience) | 1 | 2026-05-14 |
 
-**Total:** 189 entries (per 2026-05-17)
+**Total:** 190 entries (per 2026-05-17)
 
 ---
 
@@ -1266,6 +1266,109 @@ Hvis staleness > threshold OG ikke allerede fyrt høyere tier, eskaler:
 - `packages/game-client/src/games/game1/Game1Controller.ts:556-651` — wiring + tier-callbacks
 - `.claude/skills/live-room-robusthet-mandate/SKILL.md` v1.5.0 — tre-lag-arkitektur
 - Ekstern-konsulent-plan 2026-05-17 P0-2
+
+### §4.12 — Wall-clock-deadline uten setTimeout-trigger fryser UI hvis update-loopen stopper
+
+**Severity:** P0 (pilot-blokker — UX)
+**Oppdaget:** 2026-05-17 (ekstern-konsulent-review)
+**Status:** LØST 2026-05-17
+**Symptom:** `PlayScreen.loadingTransitionDeadline` ble satt til `Date.now() + 10_000` ved RUNNING→non-RUNNING-overgang. Cleanup-sjekken (`Date.now() < deadline`) lå inni `PlayScreen.update(state)`. Hvis serveren sluttet å sende `room:update`-events, kjørte aldri update igjen — og "Forbereder neste spill"-loaderen sto evig i UI selv om deadline hadde passert.
+
+**Root cause:** Wall-clock-deadline uten matchende `setTimeout`-trigger. Sjekken er avhengig av at noen kaller `update()` etter at deadline har passert. I frozen-state-scenario (server-bug, instans-restart mid-flight) skjer ikke det.
+
+**Pre-fix kode** (`PlayScreen.ts:613-614`):
+```ts
+this.loadingTransitionDeadline =
+  Date.now() + PlayScreen.LOADING_TRANSITION_TIMEOUT_MS;
+```
+
+Cleanup (`PlayScreen.ts:695-701`):
+```ts
+const loadingActive =
+  this.loadingTransitionDeadline !== null &&
+  Date.now() < this.loadingTransitionDeadline;
+if (!loadingActive && this.loadingTransitionDeadline !== null) {
+  this.loadingTransitionDeadline = null;
+}
+```
+
+Hvis `update()` aldri fyres igjen, kjører `if`-en aldri, og deadline forblir i sin opprinnelige tilstand. Idle-mode-rendering ser `loadingActive = true` for evigtid → "Forbereder"-tekst.
+
+**Konsekvenser:**
+
+- Spillere ser fryst "Forbereder neste spill"-loader uten feedback
+- Eneste recovery er manuell `window.location.reload()`
+- Frozen-state-bugen i §4.11 (LiveRoomRecoverySupervisor) ble dekket post-P0-2, men PlayScreen-loader var en parallel manifestasjon av samme grunnleggende feil — UI-state som forutsetter at update-loopen kjører
+
+**Fix (2026-05-17):**
+
+Ekstrahert state-maskinen til egen klasse `LoadingTransitionController` i `packages/game-client/src/games/game1/screens/LoadingTransitionController.ts`. Klassen inkapsulerer:
+
+- Wall-clock-deadline (samme som før)
+- Faktisk `setTimeout`-handle som fyrer cleanup uavhengig av server-pulse
+- `arm()` setter begge (idempotent — kanselerer forrige timer først)
+- `clear()` rydder begge
+- `isActive()` for sjekk inni update
+- Timer fyrer `onTimeout`-callback → PlayScreen kaller `update(lastState)` for re-render
+
+PlayScreen wirer:
+```ts
+this.loadingTransition = new LoadingTransitionController({
+  timeoutMs: 10_000,
+  onTimeout: () => {
+    if (this.lastState) this.update(this.lastState);
+  },
+});
+```
+
+På RUNNING→non-RUNNING (i `update()`):
+```ts
+this.loadingTransition.arm();
+```
+
+På catalogSlug-skifte (server advancert) eller new RUNNING:
+```ts
+this.loadingTransition.clear();
+```
+
+På destroy:
+```ts
+this.loadingTransition.destroy();
+```
+
+**Hvorfor egen klasse:**
+
+1. PlayScreen extends Pixi Container → kan ikke instansieres i unit-test uten å mocke hele Pixi-stacken. Egen klasse er direkte testbar.
+2. Timer-håndtering med idempotent arm/clear er nok ansvar for egen modul.
+3. Mønsteret matcher `AutoReloadOnDisconnect` og `LiveRoomRecoverySupervisor` som også er egne controllers.
+
+**Re-render fra timer-callback er idempotent fordi:**
+
+- `previousGameStatus = lastState.gameStatus` → RUNNING→non-RUNNING-grenen re-trigges ikke
+- `autoShowBuyPopupDone = true` etter første popup → auto-show re-trigges ikke
+- Idle-mode-renderingen er ren funksjon av state + cleared deadline
+
+**Prevention (skill-doc invariant):**
+
+`.claude/skills/live-room-robusthet-mandate/SKILL.md` v1.6.0 har ny seksjon "PlayScreen loader-transition — alle wall-clock-deadlines må ha ekte timer" som etablerer invariant: hver wall-clock-deadline i klient-koden som styrer UI-state SKAL ha matching `setTimeout`-trigger. Hvis ikke, UI-state står evig hvis update-loopen stopper.
+
+**Test-coverage (18 nye tester):**
+
+`LoadingTransitionController.test.ts`:
+- arm/clear lifecycle (idempotent, både deadline og timer)
+- onTimeout-callback (fyrer ved timer, ikke ved clear, ikke etter destroy, fail-soft ved exception)
+- isActive() — wall-clock-evaluering inkludert race-window
+- destroy() — cancler timer, blokkerer videre arm
+- Integrasjons-scenarier (frozen-state, happy-path, multi-runde)
+
+**Related:**
+
+- `packages/game-client/src/games/game1/screens/LoadingTransitionController.ts` — implementasjon
+- `packages/game-client/src/games/game1/screens/LoadingTransitionController.test.ts` — 18 regresjons-tester
+- `packages/game-client/src/games/game1/screens/PlayScreen.ts` — wiring (constructor + arm/clear/destroy-kall)
+- `packages/game-client/src/games/game1/screens/PlayScreen.loadingTransition.test.ts` — pure-function mirror (eksisterende, urørt)
+- `.claude/skills/live-room-robusthet-mandate/SKILL.md` v1.6.0 — wall-clock-deadline-invariant
+- Ekstern-konsulent-plan 2026-05-17 P0-3
 
 ---
 

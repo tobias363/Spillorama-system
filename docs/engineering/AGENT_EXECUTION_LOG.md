@@ -5347,3 +5347,82 @@ Verifiserte via `git stash && npm run test` på rein main at de 2 spillerklientR
 - P0-4: `publicGameHealth.deriveStatus` tar `mismatchStatus` (separat PR)
 - P0-5: `LobbyStateBinding.fetchOnce` AbortController med 5s timeout (separat PR)
 - P0-6: GoH 4x80 rerun med invariant-verifikasjon for V2 (Redis-roundtrip + frozen-state-test)
+
+### 2026-05-17 — PM-AI/Claude: LoadingTransitionController + ekte setTimeout for PlayScreen loader (P0-3 fra ekstern-konsulent-plan)
+
+**Agent-type:** PM/self-implementation (ekstern-konsulent-rolle, fix-implementation-agent under PM-koordinering)
+**Branch:** `claude/playscreen-loader-timer-2026-05-17`
+**Worktree:** `/Users/tobiashaugen/Projects/Spillorama-system/.claude/worktrees/naughty-ride-0807dd`
+**Scope:** Fjern wall-clock-deadline-uten-timer-bugen i `PlayScreen.loadingTransitionDeadline`. Pre-P0-3 stå loader-state evig hvis serveren sluttet å sende `room:update` etter RUNNING→non-RUNNING-overgang, fordi cleanup-sjekken lå inni `update()` som ikke fyres uten room:update-event. Plan-fil P0-3.
+
+**Kodeendringer:**
+
+- `packages/game-client/src/games/game1/screens/LoadingTransitionController.ts` (ny, 161 linjer):
+  - Klasse som eier `deadline` (wall-clock) + `timerHandle` (faktisk setTimeout)
+  - `arm()` idempotent — cancler forrige timer før ny arm
+  - `clear()` rydder begge
+  - `isActive()` for synkron sjekk inni `PlayScreen.update()`
+  - `destroy()` cancler timer + blokkerer videre `arm()` (no-op etter destroy)
+  - onTimeout-callback med fail-soft try/catch slik at callback-feil ikke krasjer controlleren
+  - Test-injection: setTimeoutFn/clearTimeoutFn/now med arrow-wrap mot "Illegal invocation"
+- `packages/game-client/src/games/game1/screens/LoadingTransitionController.test.ts` (ny, 261 linjer, 18 tester):
+  - arm/clear lifecycle (idempotent)
+  - onTimeout-callback (fyrer ved timer, ikke ved clear, ikke etter destroy, fail-soft ved exception)
+  - isActive() wall-clock-evaluering inkludert race-window-test (deadline passert uten timer-trigger)
+  - destroy() — cancler timer, blokkerer videre arm
+  - Integrasjons-scenarier: frozen-state, happy-path, multi-runde
+- `packages/game-client/src/games/game1/screens/PlayScreen.ts`:
+  - Import + instansiering av controller i constructor (med timerInjection-objekt for tester)
+  - Fjernet `loadingTransitionDeadline`-feltet (delegert til controller)
+  - `armLoadingTransitionDeadline` (gammel helper) erstattet med `this.loadingTransition.arm()`
+  - Cleanup-sites bruker `this.loadingTransition.clear()`
+  - `setNextScheduledGameSlug` bruker `clear()` på slug-skifte
+  - `isLoadingTransitionActive` delegert til controller
+  - `destroy()` kaller `this.loadingTransition.destroy()`
+  - onTimeout-callback i constructor kaller `this.update(this.lastState)` for re-render
+
+**Tester kjørt:**
+
+- `npm --prefix packages/game-client run check` — TypeScript strict pass
+- `npm --prefix packages/game-client run test -- --run LoadingTransitionController` — 18/18 pass (462ms)
+- `npm --prefix packages/game-client run test -- --run` — 1392 pass (was 1374 pre-P0-3, +18 nye), 2 fail (pre-existing spillerklientRebuildE2E.test.ts trafikklys — IKKE forårsaket av denne PR)
+
+**Hvorfor egen klasse i stedet for inline:**
+
+PlayScreen extends Pixi Container → kan ikke instansieres i unit-test uten Pixi-mock. Eksisterende `PlayScreen.loadingTransition.test.ts` tester pure-function mirror av idle-mode-logikken, men kan ikke teste timer-behavior. LoadingTransitionController som egen liten klasse:
+
+1. Er direkte unit-testbar
+2. Inkapsulerer ansvar (deadline + timer + cleanup)
+3. Matches eksisterende pattern (AutoReloadOnDisconnect, LiveRoomRecoverySupervisor)
+
+**Dokumentasjon oppdatert:**
+
+- `.claude/skills/live-room-robusthet-mandate/SKILL.md` v1.6.0 — ny seksjon "PlayScreen loader-transition — alle wall-clock-deadlines må ha ekte timer":
+  - Hvorfor wall-clock-deadlines uten setTimeout fryser UI
+  - LoadingTransitionController-mønsteret
+  - Når legge til lignende controller for fremtidige state-maskiner
+  - Hva du IKKE skal gjøre
+  - Re-render fra timer må være idempotent (forklaring)
+- `docs/engineering/PITFALLS_LOG.md` §4.12: full forklaring av wall-clock-uten-timer-bugen + fix-detaljer + prevention. Indeks oppdatert (§4: 13→14, total: 189→190).
+
+**Coordination block (worktree-routine 2026-05-17):**
+
+- Fresh-main sync: `git fetch origin main --prune` + `git switch -c claude/playscreen-loader-timer-2026-05-17 origin/main` ved bf939f3f (post-PR-#1570-merge).
+- Branch lane: claude.
+- Worktree: ephemeral `.claude/worktrees/naughty-ride-0807dd`.
+- Shared files touched: `docs/engineering/PITFALLS_LOG.md` (append-only §4.12 + indeks-tellere), `docs/engineering/AGENT_EXECUTION_LOG.md` (denne entry), `.claude/skills/live-room-robusthet-mandate/SKILL.md` (knowledge-protokoll v1.6.0).
+- Coordination note: PR #1570 (P0-2) merget før jeg startet — ingen overlap.
+
+**Læring:**
+
+- Wall-clock-deadlines i klient-kode er en fallgruve hvis cleanup-sjekken lever inne i en function som ikke kjører i frozen-state. ALLTID kombiner med setTimeout som fyrer cleanup-callback uavhengig av server-pulse.
+- Refaktor til egen liten klasse for å gjøre logikken testbar. Pixi Container-klasser kan ikke unit-testes uten heavy mocking.
+- Re-render fra timer-callback må være idempotent. Sjekk at alle state-mutations inni `update()` har gate-er som hindrer dobbel-fyring.
+- Fail-soft try/catch rundt onTimeout-callback er viktig — hvis `update()` throw-er, må controlleren forbli i ren state for neste arm-syklus.
+- Mønsteret med små injectable controllers (AutoReload, LiveRoomRecoverySupervisor, LoadingTransitionController) gjør recovery-arkitekturen modulær og testbar. Hver klasse har 1 ansvar.
+
+**Neste steg fra plan:**
+
+- P0-4: `publicGameHealth.deriveStatus` tar `mismatchStatus` (separat PR)
+- P0-5: `LobbyStateBinding.fetchOnce` AbortController med 5s timeout (separat PR)
+- P0-6: GoH 4x80 rerun med invariant-verifikasjon for V2 (Redis-roundtrip + frozen-state-test)
