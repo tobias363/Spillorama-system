@@ -9,6 +9,46 @@ This is the short operational routine. If this document and chat disagree, this 
 
 ---
 
+## 0. Mandatory session preflight
+
+Every Codex and Claude session must run the preflight before the first file edit.
+
+Codex:
+
+```bash
+cd /Users/tobiashaugen/Projects/Spillorama-system-codex
+npm run agent:preflight -- --actor codex
+```
+
+Claude:
+
+```bash
+cd /Users/tobiashaugen/Projects/Spillorama-system-claude
+npm run agent:preflight -- --actor claude
+```
+
+Admin/PM review lane:
+
+```bash
+cd /Users/tobiashaugen/Projects/Spillorama-system
+npm run agent:preflight -- --actor admin
+```
+
+Do not edit files until the script prints `PREFLIGHT PASS`.
+
+The preflight checks:
+
+- correct local worktree for the actor
+- clean worktree before rebase/work starts
+- fresh `origin/main`
+- current branch contains latest `origin/main`
+- branch prefix matches `codex/` or `claude/`
+- open PRs are listed for shared-file ownership review
+
+If the preflight fails, follow the exact command it prints. Do not work around it in chat.
+
+---
+
 ## 1. Fixed worktree lanes
 
 Use separate local worktrees. Do not let Codex and Claude work in the same checkout.
@@ -30,9 +70,9 @@ Temporary exception on 2026-05-17: Codex already has the active PR branch `codex
 Before any Codex or Claude session edits files:
 
 ```bash
-git fetch origin main --prune
-git status -sb
-gh pr list --state open --json number,title,headRefName,isDraft,mergeStateStatus
+npm run agent:preflight -- --actor codex
+# or:
+npm run agent:preflight -- --actor claude
 ```
 
 If starting from `main`:
@@ -162,9 +202,10 @@ If Claude asks whether it can continue while Codex has an active PR touching sha
 Vent med alle filer som overlapper Codex sin PR til den er merget. Du kan jobbe på egen claude/<scope>-branch i /Users/tobiashaugen/Projects/Spillorama-system-claude hvis scope ikke rører samme lock-filer.
 
 Før første filendring:
-git fetch origin main --prune
-git rebase origin/main
-gh pr list --state open --json number,title,headRefName,isDraft,mergeStateStatus
+cd /Users/tobiashaugen/Projects/Spillorama-system-claude
+npm run agent:preflight -- --actor claude
+
+Ikke rediger filer før scriptet skriver `PREFLIGHT PASS`.
 
 Hvis du må røre PITFALLS_LOG, AGENT_EXECUTION_LOG, pm-orchestration-pattern, workflows eller package.json/package-lock.json: stopp og avklar owner først. Etter Codex-merge skal du rebase mot origin/main før du gjør append-only endringer.
 
@@ -181,9 +222,10 @@ If Codex starts while Claude has an active PR touching shared files:
 Codex skal ikke røre Claude-eide shared files før Claude-PR er merged eller parkert. Runtime-fiks kan fortsette på codex/<scope>-branch bare hvis diffen ikke overlapper.
 
 Før første filendring:
-git fetch origin main --prune
-git rebase origin/main
-gh pr list --state open --json number,title,headRefName,isDraft,mergeStateStatus
+cd /Users/tobiashaugen/Projects/Spillorama-system-codex
+npm run agent:preflight -- --actor codex
+
+Ikke rediger filer før scriptet skriver `PREFLIGHT PASS`.
 
 Hvis runtime-fiksen krever skill/PITFALLS/AGENT_EXECUTION_LOG, gjør det i samme PR bare hvis Claude ikke eier filene. Hvis Claude eier dem, merge/rebase først og legg deretter append-only knowledge update.
 ```
@@ -217,4 +259,5 @@ Codex/Claude coordination: current Codex branch <branch or none>, current Claude
 
 | Date | Change |
 |---|---|
+| 2026-05-17 | Added mandatory `agent-worktree-preflight.sh` start command so Codex/Claude get a fail-fast lane/fresh-main check before file edits. |
 | 2026-05-17 | Initial mandatory worktree routine added after parallel Codex/Claude work created repeated overlap risk around knowledge logs, workflow gates, and package files. |
