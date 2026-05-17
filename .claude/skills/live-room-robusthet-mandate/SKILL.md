@@ -1,8 +1,8 @@
 ---
 name: live-room-robusthet-mandate
-description: When the user/agent works with rom-arkitektur, socket-events, draw-tick, ticket-purchase, wallet-touch fra rom-events, eller pilot-gating-tiltak (R1-R12). Also use when they mention RoomAlertingService, SocketIdempotencyStore, EngineCircuitBreakerPort, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12, BIN-810, BIN-811, BIN-812, BIN-813, BIN-814, BIN-815, BIN-816, BIN-817, BIN-818, BIN-819, BIN-820, BIN-821, BIN-822, chaos-test, failover, klient-reconnect, idempotent socket-events, clientRequestId dedup, health-endpoint per rom, alerting Slack PagerDuty, DR-runbook, Evolution Gaming-grade oppetid, 99.95%, perpetual-loop leak, per-rom resource-isolation, stuck-game-recovery, monotonic stateVersion, ADR-0019, ADR-0020, ADR-0022. Make sure to use this skill whenever someone touches Spill 1/2/3 live-rom-arkitektur, robusthet-tiltak, eller pilot-gating — even if they don't explicitly ask for it.
+description: When the user/agent works with rom-arkitektur, socket-events, draw-tick, ticket-purchase, wallet-touch fra rom-events, eller pilot-gating-tiltak (R1-R12). Also use when they mention RoomAlertingService, SocketIdempotencyStore, EngineCircuitBreakerPort, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12, BIN-810, BIN-811, BIN-812, BIN-813, BIN-814, BIN-815, BIN-816, BIN-817, BIN-818, BIN-819, BIN-820, BIN-821, BIN-822, chaos-test, failover, klient-reconnect, idempotent socket-events, clientRequestId dedup, health-endpoint per rom, alerting Slack PagerDuty, DR-runbook, Evolution Gaming-grade oppetid, 99.95%, perpetual-loop leak, per-rom resource-isolation, stuck-game-recovery, monotonic stateVersion, RoomStateStore, SerializedRoomState, scheduledGameId-persistens, isHallShared-persistens, isTestHall-persistens, pendingMiniGame-persistens, spill3PhaseState-persistens, Redis-restart-recovery, ADR-0019, ADR-0020, ADR-0022. Make sure to use this skill whenever someone touches Spill 1/2/3 live-rom-arkitektur, robusthet-tiltak, eller pilot-gating — even if they don't explicitly ask for it.
 metadata:
-  version: 1.3.0
+  version: 1.4.0
   project: spillorama
 ---
 
@@ -357,6 +357,35 @@ Symptom: Spill 2 hukommelses-leak over 24t.
 - IKKE utvide til > 4 haller før R4/R6/R9 bestått
 - IKKE forhandl ned 99.95%-mål uten Tobias-godkjenning
 
+## Redis room-state-serialisering — INVARIANT
+
+`apps/backend/src/store/RoomStateStore.ts` definerer `SerializedRoomState` og `SerializedGameState`. Disse er kontrakten mot Redis (`RedisRoomStateStore.persist()` kaller `serializeRoom(room)` → `JSON.stringify` → `SETEX`).
+
+**Hver gang du legger til et felt i `RoomState` eller `GameState` (types.ts) som beskriver live-room-state (ikke ren UI-state), MÅ du gjøre en av disse:**
+
+1. **Persistere det:** legg til feltet i `SerializedRoomState`/`SerializedGameState`, oppdater `serializeRoom`/`serializeGame` til å emitte det, og `deserializeRoom`/`deserializeGame` til å gjenopprette det. Optional-keys skal **kun emittes når satt** (`if (room.X !== undefined)`-mønster). Deserialiseringen skal **ikke overstyre med default** når feltet mangler — la `undefined` passere.
+2. **Eksplisitt unnta det:** legg en JSDoc-kommentar i `RoomState`/`GameState` som forklarer hvorfor feltet IKKE persisteres (eks. "regenereres ved første draw" eller "kun in-memory cache").
+
+**Hvorfor:** Felter som settes via dedikerte engine-helpers (eks. `markRoomAsScheduledAndPersist`) ser ut som persistert state fordi `setAndPersistWithPath` returnerer success — men hvis serializer-en dropper dem, går de tapt ved Redis-restart, og første reconnect-burst etterpå feiler.
+
+**Konkrete invarianter (per 2026-05-17):**
+
+| Felt | Hvor | Hvorfor det MÅ persisteres |
+|---|---|---|
+| `scheduledGameId` | RoomState | scheduled Spill 1-binding mot `app_game1_scheduled_games`. Tap → `room:resume`-validering feiler → alle reconnects feiler |
+| `isHallShared` | RoomState | GoH-rom + global Spill 2/3 skal skippe HALL_MISMATCH-sjekken. Tap → spillere kastes ut av rommet |
+| `isTestHall` | RoomState | Demo-haller går gjennom alle 5 faser i stedet for å ende på Fullt Hus. Tap → pattern-evaluator avslutter for tidlig |
+| `pendingMiniGame` | RoomState | Mini-game som overlevde `archiveIfEnded`-wipe. Tap → Tobias prod-incident 2026-04-30 reaktiveres |
+| `spill3PhaseState` | GameState | Spill 3 sequential phase-state (R10). Tap → runde re-starter fra Rad 1 etter recovery |
+| `isPaused` + pause-felter | GameState | Master-pauset spill auto-resumes etter restart hvis disse mangler |
+| `participatingPlayerIds` | GameState | KRITISK-8: payout-binding og compliance-ledger trenger denne |
+| `patterns` / `patternResults` | GameState | Live pattern-state for klient — uten dette mister klient progresjon på recovery |
+| `isTestGame` | GameState | BIN-463: test-flagg. Tap → test-runde kan plutselig debite ekte wallets |
+
+**Test-pattern:** `apps/backend/src/store/RoomStateStore.test.ts` har én test per kritisk felt + én "ALLE felter samtidig"-test + én "pre-hardening backward-compat"-test som verifiserer at gamle Redis-payloads fortsatt deserialiseres uten å introdusere uønskede defaults.
+
+**Når du oppdager et NYTT felt som bør persisteres:** legg det til i `SerializedRoomState`/`SerializedGameState`, oppdater `serializeRoom`/`serializeGame`-funksjonene, legg til regresjons-test, og oppdater tabellen over. Sjekk samtidig om eksisterende kode kaller `setAndPersistWithPath` med det feltet satt — hvis ja, tapet er ekte og må flagges i PITFALLS_LOG.
+
 ## Kanonisk referanse
 
 `LIVE_ROOM_ROBUSTNESS_MANDATE_2026-05-08.md` er autoritativ. Tobias-eier — endringer krever direkte godkjenning. Ved tvil mellom kode og mandat: mandat vinner, koden må fikses.
@@ -381,3 +410,4 @@ Symptom: Spill 2 hukommelses-leak over 24t.
 | 2026-05-13 | v1.1.0 — oppdatert R-status: R2/R3 PASSED, R4 infrastruktur merget, R11 circuit-breaker merget. Lagt til Bølge 1 + Bølge 2 + ADR-0019/0020/0021/0022. |
 | 2026-05-14 | v1.2.0 — lagt til "Etter-runde auto-return til lobby" seksjon (`MAX_PREPARING_ROOM_MS = 15s`-fallback) etter Tobias-rapport 2026-05-14 09:54 ("Forbereder rommet..."-spinner hang evig). |
 | 2026-05-14 | v1.3.0 — la til "Synthetic bingo-runde-test (R4-precursor)" seksjon under pilot-gating. Småskala-test som ALLTID må PASSE pre-pilot. Doc: `docs/operations/SYNTHETIC_BINGO_TEST_RUNBOOK.md`. |
+| 2026-05-17 | v1.4.0 — la til "Redis room-state-serialisering — INVARIANT" seksjon. Hardened `SerializedRoomState`/`SerializedGameState` til å persistere `scheduledGameId`, `isHallShared`, `isTestHall`, `pendingMiniGame` (RoomState) + `spill3PhaseState`, `isPaused`/pause-felter, `participatingPlayerIds`, `patterns`/`patternResults`, `miniGame`/`jackpot`, `isTestGame` (GameState). Pre-hardening gikk disse tapt på Redis-restart — scheduled Spill 1 mistet binding, GoH-rom mistet isHallShared og ga HALL_MISMATCH til ikke-master-haller. |

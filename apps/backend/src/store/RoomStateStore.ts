@@ -8,7 +8,21 @@
  * The store manages serialization of Map/Set fields in RoomState/GameState.
  */
 
-import type { RoomState, GameState, Player, Ticket, ClaimRecord, GameSnapshot, RecoverableGameSnapshot, RoomSummary } from "../game/types.js";
+import type {
+  RoomState,
+  GameState,
+  Player,
+  Ticket,
+  ClaimRecord,
+  GameSnapshot,
+  RecoverableGameSnapshot,
+  RoomSummary,
+  PatternDefinition,
+  PatternResult,
+  JackpotState,
+  MiniGameState,
+  PendingMiniGameState,
+} from "../game/types.js";
 
 // ── Serializable versions (no Map/Set) ────────────────────────────────
 
@@ -32,6 +46,40 @@ export interface SerializedGameState {
   startedAt: string;
   endedAt?: string;
   endedReason?: string;
+  /**
+   * Spill 1-recovery hardening (2026-05-17): live-room-state-felter som tidligere
+   * gikk tapt på Redis-restart. Optional fordi pre-hardening-snapshots i Redis
+   * må forbli leselige under rolling deploy. `deserializeGame` lar
+   * `undefined`-felter passere uendret.
+   *
+   * - `patterns` / `patternResults`: pattern-evaluator-state for Rad 1-4 +
+   *   Fullt Hus. Uten dette ville klienten miste pattern-progresjon på
+   *   recovery midt i en runde.
+   * - `participatingPlayerIds` (KRITISK-8): hvilke spillere som er bound til
+   *   denne runden — kritisk for payout-binding og compliance-ledger.
+   * - `jackpot` / `miniGame`: aktive payout-flows som må overleve restart
+   *   (mini-game spillet etter Fullt Hus, SpinnGo-jackpot).
+   * - `isPaused` / `pauseMessage` / `pauseUntil` / `pauseReason` (BIN-460,
+   *   MED-11): pause-state som master har satt. Uten dette ville et pauset
+   *   spill auto-resume etter restart.
+   * - `isTestGame` (BIN-463): test-flagg som hindrer real-money-transaksjoner.
+   *   Hvis dette gikk tapt på restart kunne en test-runde plutselig debite
+   *   ekte wallets.
+   * - `spill3PhaseState` (R10 / BIN-820): Spill 3 sequential phase-state-
+   *   machine. Uten dette ville Spill 3 restarte fra Rad 1 etter recovery,
+   *   selv om runden allerede var i Rad 3.
+   */
+  patterns?: PatternDefinition[];
+  patternResults?: PatternResult[];
+  participatingPlayerIds?: string[];
+  jackpot?: JackpotState;
+  miniGame?: MiniGameState;
+  isPaused?: boolean;
+  pauseMessage?: string;
+  pauseUntil?: string;
+  pauseReason?: string;
+  isTestGame?: boolean;
+  spill3PhaseState?: GameState["spill3PhaseState"];
 }
 
 export interface SerializedRoomState {
@@ -44,6 +92,34 @@ export interface SerializedRoomState {
    * "bingo" for backward compatibility.
    */
   gameSlug?: string;
+  /**
+   * Spill 1-recovery hardening (2026-05-17): kritiske rom-state-felter som
+   * tidligere ble droppet av `serializeRoom`/`deserializeRoom`. Tap av disse
+   * på Redis-restart ga symptomer som:
+   *
+   * - `scheduledGameId === undefined`: scheduled Spill 1-rom mistet
+   *   bindingen til `app_game1_scheduled_games`-raden. `room:resume`-
+   *   validering mot `scheduledGameId` feilet. Klienter måtte reloade.
+   * - `isHallShared === undefined`: GoH-rom (Spill 1 per-link, Spill 2/3
+   *   global) mistet shared-flagget. `BingoEngine.joinRoom` aktiverte
+   *   HALL_MISMATCH-sjekken som skal være relaksert for shared rom →
+   *   spillere fra ikke-master-haller ble kastet ut.
+   * - `isTestHall === undefined`: demo-haller (`isTestHall=true`) mistet
+   *   test-flagget → pattern-evaluator endte runden på Fullt Hus i stedet
+   *   for å gå gjennom alle 5 faser, og produksjons-end-on-bingo-oppførsel
+   *   trådte inn for haller som skulle vært test-modus.
+   * - `pendingMiniGame === undefined`: uspilte mini-games som skulle
+   *   overleve `archiveIfEnded`-wipe forsvant ⇒ Tobias prod-incident
+   *   2026-04-30 ville reaktiveres.
+   *
+   * Optional på typen for forward-compat med eldre snapshots; deserialisering
+   * defaulter `undefined` til samme verdi som før hardening (ingen endring i
+   * adferd hvis feltet mangler).
+   */
+  scheduledGameId?: string | null;
+  isHallShared?: boolean;
+  isTestHall?: boolean;
+  pendingMiniGame?: PendingMiniGameState;
   players: Record<string, Player>;
   currentGame?: SerializedGameState;
   gameHistory: GameSnapshot[];
@@ -53,7 +129,7 @@ export interface SerializedRoomState {
 // ── Serialization helpers ─────────────────────────────────────────────
 
 export function serializeRoom(room: RoomState): SerializedRoomState {
-  return {
+  const serialized: SerializedRoomState = {
     code: room.code,
     hallId: room.hallId,
     hostPlayerId: room.hostPlayerId,
@@ -63,10 +139,18 @@ export function serializeRoom(room: RoomState): SerializedRoomState {
     gameHistory: room.gameHistory,
     createdAt: room.createdAt
   };
+  // Spill 1-recovery hardening (2026-05-17): only emit optional fields when
+  // they are set, slik at den serialiserte payloaden ikke blåses opp med
+  // `undefined`-keys for rom som ikke har scheduled-binding etc.
+  if (room.scheduledGameId !== undefined) serialized.scheduledGameId = room.scheduledGameId;
+  if (room.isHallShared !== undefined) serialized.isHallShared = room.isHallShared;
+  if (room.isTestHall !== undefined) serialized.isTestHall = room.isTestHall;
+  if (room.pendingMiniGame !== undefined) serialized.pendingMiniGame = room.pendingMiniGame;
+  return serialized;
 }
 
 export function deserializeRoom(data: SerializedRoomState): RoomState {
-  return {
+  const room: RoomState = {
     code: data.code,
     hallId: data.hallId,
     hostPlayerId: data.hostPlayerId,
@@ -78,6 +162,14 @@ export function deserializeRoom(data: SerializedRoomState): RoomState {
     gameHistory: data.gameHistory,
     createdAt: data.createdAt
   };
+  // Spill 1-recovery hardening (2026-05-17): bevar optional felter når de
+  // finnes i payloaden. Mangler de (pre-hardening Redis-snapshot) lar vi
+  // dem være `undefined` slik at adferden matcher pre-hardening default.
+  if (data.scheduledGameId !== undefined) room.scheduledGameId = data.scheduledGameId;
+  if (data.isHallShared !== undefined) room.isHallShared = data.isHallShared;
+  if (data.isTestHall !== undefined) room.isTestHall = data.isTestHall;
+  if (data.pendingMiniGame !== undefined) room.pendingMiniGame = data.pendingMiniGame;
+  return room;
 }
 
 function serializeGame(game: GameState): SerializedGameState {
@@ -85,7 +177,7 @@ function serializeGame(game: GameState): SerializedGameState {
   for (const [playerId, sets] of game.marks) {
     marks[playerId] = sets.map((s) => [...s]);
   }
-  return {
+  const serialized: SerializedGameState = {
     id: game.id,
     status: game.status,
     entryFee: game.entryFee,
@@ -106,6 +198,33 @@ function serializeGame(game: GameState): SerializedGameState {
     endedAt: game.endedAt,
     endedReason: game.endedReason
   };
+  // Spill 1-recovery hardening (2026-05-17): bevar live-room-felter på
+  // tvers av restart. Bare emit når de er satt for å holde payloaden
+  // kompakt og forward-compat.
+  if (game.patterns !== undefined) serialized.patterns = game.patterns;
+  if (game.patternResults !== undefined) serialized.patternResults = game.patternResults;
+  if (game.participatingPlayerIds !== undefined) {
+    serialized.participatingPlayerIds = [...game.participatingPlayerIds];
+  }
+  if (game.jackpot !== undefined) serialized.jackpot = game.jackpot;
+  if (game.miniGame !== undefined) serialized.miniGame = game.miniGame;
+  if (game.isPaused !== undefined) serialized.isPaused = game.isPaused;
+  if (game.pauseMessage !== undefined) serialized.pauseMessage = game.pauseMessage;
+  if (game.pauseUntil !== undefined) serialized.pauseUntil = game.pauseUntil;
+  if (game.pauseReason !== undefined) serialized.pauseReason = game.pauseReason;
+  if (game.isTestGame !== undefined) serialized.isTestGame = game.isTestGame;
+  if (game.spill3PhaseState !== undefined) {
+    // Deep-clone JSON-felter slik at vi ikke deler referanse mellom in-memory
+    // og persistert payload — speiler `BingoEngine.serializeGame`-mønsteret.
+    serialized.spill3PhaseState = {
+      currentPhaseIndex: game.spill3PhaseState.currentPhaseIndex,
+      pausedUntilMs: game.spill3PhaseState.pausedUntilMs,
+      phasesWon: [...game.spill3PhaseState.phasesWon],
+      status: game.spill3PhaseState.status,
+      endedReason: game.spill3PhaseState.endedReason,
+    };
+  }
+  return serialized;
 }
 
 function deserializeGame(data: SerializedGameState): GameState {
@@ -113,7 +232,7 @@ function deserializeGame(data: SerializedGameState): GameState {
   for (const [playerId, arrays] of Object.entries(data.marks)) {
     marks.set(playerId, arrays.map((arr) => new Set(arr)));
   }
-  return {
+  const game: GameState = {
     id: data.id,
     status: data.status,
     entryFee: data.entryFee,
@@ -134,6 +253,28 @@ function deserializeGame(data: SerializedGameState): GameState {
     endedAt: data.endedAt,
     endedReason: data.endedReason
   };
+  if (data.patterns !== undefined) game.patterns = data.patterns;
+  if (data.patternResults !== undefined) game.patternResults = data.patternResults;
+  if (data.participatingPlayerIds !== undefined) {
+    game.participatingPlayerIds = [...data.participatingPlayerIds];
+  }
+  if (data.jackpot !== undefined) game.jackpot = data.jackpot;
+  if (data.miniGame !== undefined) game.miniGame = data.miniGame;
+  if (data.isPaused !== undefined) game.isPaused = data.isPaused;
+  if (data.pauseMessage !== undefined) game.pauseMessage = data.pauseMessage;
+  if (data.pauseUntil !== undefined) game.pauseUntil = data.pauseUntil;
+  if (data.pauseReason !== undefined) game.pauseReason = data.pauseReason;
+  if (data.isTestGame !== undefined) game.isTestGame = data.isTestGame;
+  if (data.spill3PhaseState !== undefined) {
+    game.spill3PhaseState = {
+      currentPhaseIndex: data.spill3PhaseState.currentPhaseIndex,
+      pausedUntilMs: data.spill3PhaseState.pausedUntilMs,
+      phasesWon: [...data.spill3PhaseState.phasesWon],
+      status: data.spill3PhaseState.status,
+      endedReason: data.spill3PhaseState.endedReason,
+    };
+  }
+  return game;
 }
 
 // ── Recovery deserialization ─────────────────────────────────────────
