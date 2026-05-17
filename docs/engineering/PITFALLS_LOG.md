@@ -47,7 +47,7 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§1 Compliance & Regulatorisk](#1-compliance--regulatorisk) | 9 | 2026-05-10 |
 | [§2 Wallet & Pengeflyt](#2-wallet--pengeflyt) | 11 | 2026-05-14 |
 | [§3 Spill 1, 2, 3 arkitektur](#3-spill-1-2-3-arkitektur) | 19 | 2026-05-15 |
-| [§4 Live-rom-state](#4-live-rom-state) | 14 | 2026-05-17 |
+| [§4 Live-rom-state](#4-live-rom-state) | 15 | 2026-05-17 |
 | [§5 Git & PR-flyt](#5-git--pr-flyt) | 16 | 2026-05-15 |
 | [§6 Test-infrastruktur](#6-test-infrastruktur) | 25 | 2026-05-17 |
 | [§7 Frontend / Game-client](#7-frontend--game-client) | 47 | 2026-05-16 |
@@ -57,7 +57,7 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§11 Agent-orkestrering](#11-agent-orkestrering) | 26 | 2026-05-17 |
 | [§12 DB-resilience](#12-db-resilience) | 1 | 2026-05-14 |
 
-**Total:** 190 entries (per 2026-05-17)
+**Total:** 191 entries (per 2026-05-17)
 
 ---
 
@@ -1369,6 +1369,87 @@ this.loadingTransition.destroy();
 - `packages/game-client/src/games/game1/screens/PlayScreen.loadingTransition.test.ts` — pure-function mirror (eksisterende, urørt)
 - `.claude/skills/live-room-robusthet-mandate/SKILL.md` v1.6.0 — wall-clock-deadline-invariant
 - Ekstern-konsulent-plan 2026-05-17 P0-3
+
+### §4.13 — Health-endpoint returnerte `status: ok` selv ved mismatch — ops-dashbord så falsk grønt
+
+**Severity:** P0 (pilot-blokker — observabilitet)
+**Oppdaget:** 2026-05-17 (ekstern-konsulent-review)
+**Status:** LØST 2026-05-17
+**Symptom:** `/api/games/spill[1-3]/health` rapporterer `mismatchStatus` i payload — verdier som `missing_engine_room`, `unexpected_engine_room`, `duplicate_engine_rooms`, `scheduled_game_mismatch` indikerer at engine-state IKKE matcher forventet rom-konfigurasjon. Men `deriveStatus()`-funksjonen som beregner aggregert `status`-felt brukte KUN `phase`, `withinOpeningHours`, `redisHealthy`, `dbHealthy`, `lastDrawAgeMs` — den ignorerte `mismatchStatus` helt.
+
+**Konsekvenser:**
+
+- Ops-dashbord som pollet `data.status` så grønt selv når invariants var brutt
+- PagerDuty/Slack-alerts triggert ikke ved mismatch (gates på `status: degraded|down`)
+- Operatører måtte sjekke `data.mismatchStatus`-feltet eksplisitt — i praksis aldri gjort
+- Zombie/leakage-rom (`unexpected_engine_room`) gikk uoppdaget; klienter kunne bli routet til feil rom uten alarm
+- Spill 2/3 perpetual-loop som ikke spawnet rom (`missing_engine_room`) ble ikke synlig før klienter klaget
+
+**Root cause:** `deriveStatus()` og `deriveMismatchStatus()` var separate funksjoner uten kobling. Begge ble kalt for hver health-request, men kun førstnevnte påvirket `status`-feltet. Mismatch-info ble redused til en separat felt som krevde at klienten visste at den måtte sjekke.
+
+**Pre-fix kode** (`publicGameHealth.ts:477-507`):
+```ts
+function deriveStatus(args: {
+  phase, withinOpeningHours, redisHealthy, dbHealthy, lastDrawAgeMs
+}): HealthStatus {
+  if (!dbHealthy) return "down";
+  // ... ingen sjekk av mismatchStatus
+  return "ok";
+}
+```
+
+**Fix (2026-05-17):**
+
+`deriveStatus()` tar nå `mismatchStatus` som påkrevd input. Beslutnings-rekkefølge:
+
+1. `!dbHealthy` → down (hovedavhengighet)
+2. `unexpected_engine_room` → **down** (zombie/leakage er alvorlig nok til å overstyre alt annet untatt DB)
+3. Aktiv runde + `!redisHealthy` → degraded
+4. Aktiv runde + stale draw → degraded
+5. Aktiv runde + mismatch ≠ ok → **degraded**
+6. Idle utenfor åpningstid → down (eksisterende)
+7. Idle innenfor åpningstid + `!redisHealthy` → degraded (eksisterende)
+8. Idle innenfor åpningstid + mismatch ≠ ok → **degraded**
+9. Else → ok
+
+`unexpected_engine_room` får `down` (ikke degraded) fordi det indikerer aktiv routing-leak — klienter kan bli rute til feil rom. Alle andre mismatches gir `degraded` for å unngå PagerDuty-storm ved transient tilstander (Spill 2/3 perpetual-loop som ikke har spawnet rom enda).
+
+Alle 3 call-sites (Spill 1, 2, 3) oppdatert til å beregne `mismatchStatus` FØR `deriveStatus()` slik at samme verdi brukes i både `status`-feltet og payload-en. Tidligere ble `deriveMismatchStatus()` kalt to ganger inni samme request — nå én gang, returnert til både `status` og payload.
+
+**Prevention (skill-doc invariant):**
+
+`.claude/skills/live-room-robusthet-mandate/SKILL.md` v1.7.0 har ny seksjon "Health-endpoint må reflektere mismatch-tilstand i aggregert status" som etablerer regelen: ved hver nye `MismatchStatus`-verdi MÅ man (1) bestemme degraded vs down, (2) legge til regresjons-test, (3) oppdatere eskalerings-tabellen.
+
+**Test-coverage (11 nye tester):**
+
+`publicGameHealth.test.ts`:
+- `unexpected_engine_room` under aktiv runde → down
+- `unexpected_engine_room` under idle → down (ikke overstyrt av andre flagger)
+- `dbHealthy=false` vinner over `unexpected_engine_room` (DB-prioritet bevart)
+- Aktiv runde + `missing_engine_room` → degraded
+- Aktiv runde + `scheduled_game_mismatch` → degraded
+- Aktiv runde + `duplicate_engine_rooms` → degraded
+- Idle innenfor åpningstid + `missing_engine_room` → degraded
+- Idle innenfor åpningstid + `duplicate_engine_rooms` → degraded
+- Idle utenfor åpningstid + mismatch → fortsatt down (forventet stengt)
+- Stale draw + mismatch → degraded (verifiserer at vi ikke regresseres)
+- Paused + mismatch → degraded
+
+Eksisterende 24 tester oppdatert til å passe inn `mismatchStatus: "ok"` (default). 2 integration-tester (Spill 2/3 stub uten spawn) oppdatert fra `status: ok` til `status: degraded` — dette er den korrekte oppførselen post-fix.
+
+**Migreringspath for konsumenter:**
+
+Ops-dashbord som tidligere sjekket både `data.status` og `data.mismatchStatus` separat kan nå forenkles til å kun sjekke `data.status`. Eksisterende sjekk-logikk fortsetter å fungere — `mismatchStatus` rapporteres fortsatt i payload uendret.
+
+PagerDuty-regler som gates på `status: degraded|down` vil nå utløse ved mismatches. Det er INTENDED behavior — tidligere gikk mismatch-ene under radaren.
+
+**Related:**
+
+- `apps/backend/src/routes/publicGameHealth.ts:477-540` — `deriveStatus()` med mismatchStatus
+- `apps/backend/src/routes/publicGameHealth.ts:597, 670, 729` — 3 call-sites med pre-beregnet mismatchStatus
+- `apps/backend/src/routes/__tests__/publicGameHealth.test.ts` — 11 nye regresjons-tester + 2 oppdaterte integration
+- `.claude/skills/live-room-robusthet-mandate/SKILL.md` v1.7.0 — eskalerings-tabell + invariant
+- Ekstern-konsulent-plan 2026-05-17 P0-4
 
 ---
 

@@ -464,15 +464,30 @@ function deriveMismatchStatus(args: {
 }
 
 /**
- * Status-mapping logic — kombinér phase, åpningstid og health-flagger
- * til én av "ok" / "degraded" / "down".
+ * Status-mapping logic — kombinér phase, åpningstid, health-flagger og
+ * mismatch-status til én av "ok" / "degraded" / "down".
  *
- * Beslutninger:
+ * Beslutninger (i prioritert rekkefølge):
  *   1. dbHealthy=false → "down" (DB er hovedavhengighet).
- *   2. Aktiv runde (running/paused) men redis nede ELLER stale-draw → "degraded".
- *   3. Utenfor åpningstid OG ingen aktiv runde → "down" (forventet stengt).
- *   4. Innenfor åpningstid men ingen aktiv runde → "ok" (venter på neste spill).
- *   5. Aktiv runde uten problemer → "ok".
+ *   2. mismatchStatus="unexpected_engine_room" → "down". Engine har et rom
+ *      som IKKE skulle vært der — indikerer leakage/zombie-rom som
+ *      potensielt forstyrrer routing. Bør ikke serveres som ok.
+ *   3. Aktiv runde (running/paused) men redis nede ELLER stale-draw → "degraded".
+ *   4. Aktiv runde med mismatch (missing_engine_room/scheduled_game_mismatch/
+ *      duplicate_engine_rooms) → "degraded". State-inkonsistens —
+ *      klienter kan motta feilaktig snapshot eller bli routet feil.
+ *   5. Utenfor åpningstid OG ingen aktiv runde → "down" (forventet stengt).
+ *   6. Innenfor åpningstid uten aktiv runde men mismatch → "degraded".
+ *      Eks: Spill 2/3 perpetual-loop som skulle ha spawnet rom men ikke
+ *      har det (missing_engine_room).
+ *   7. Innenfor åpningstid uten aktiv runde og uten mismatch → "ok"
+ *      (venter på neste spill).
+ *   8. Aktiv runde uten problemer → "ok".
+ *
+ * P0-4 (ekstern-konsulent-plan 2026-05-17): mismatchStatus var tidligere
+ * rapportert i payload men IKKE brukt i aggregert status. Ops-dashbord
+ * som pollet `status`-feltet så grønt selv når invariants var brutt.
+ * Nå eskalerer mismatch til degraded/down basert på alvorlighet.
  */
 function deriveStatus(args: {
   phase: HealthPhase;
@@ -480,11 +495,24 @@ function deriveStatus(args: {
   redisHealthy: boolean;
   dbHealthy: boolean;
   lastDrawAgeMs: number | null;
+  mismatchStatus: MismatchStatus;
 }): HealthStatus {
-  const { phase, withinOpeningHours, redisHealthy, dbHealthy, lastDrawAgeMs } =
-    args;
+  const {
+    phase,
+    withinOpeningHours,
+    redisHealthy,
+    dbHealthy,
+    lastDrawAgeMs,
+    mismatchStatus,
+  } = args;
 
   if (!dbHealthy) return "down";
+
+  // P0-4 (2026-05-17): unexpected_engine_room = vi ser rom som IKKE skulle
+  // vært der. Det er en routing-leak som potensielt sender klienter til
+  // feil rom — eskalerer til "down" så ops får alarm uavhengig av andre
+  // helse-flagger.
+  if (mismatchStatus === "unexpected_engine_room") return "down";
 
   const hasActiveRound = phase === "running" || phase === "paused";
 
@@ -497,12 +525,22 @@ function deriveStatus(args: {
     ) {
       return "degraded";
     }
+    // P0-4: mismatch under aktiv runde — state-inkonsistens som
+    // potensielt påvirker pågående spillere (snapshot replay, claim-
+    // routing). Degraded så ops kan se det selv om systemet er
+    // funksjonelt for de fleste klienter.
+    if (mismatchStatus !== "ok") return "degraded";
     return "ok";
   }
 
   // No active round.
   if (!withinOpeningHours) return "down";
   if (!redisHealthy) return "degraded";
+  // P0-4: mismatch innenfor åpningstid uten aktiv runde — typisk
+  // Spill 2/3 perpetual-loop som ikke har spawnet rom enda, eller
+  // duplicate-rom som har lagt seg igjen etter en feilet runde-end.
+  // Degraded — ikke ok.
+  if (mismatchStatus !== "ok") return "degraded";
   return "ok";
 }
 
@@ -593,6 +631,14 @@ export function createPublicGameHealthRouter(
       const engineRoomExists = scheduleInfo.expectedRoomCode
         ? liveState.roomCodes.includes(scheduleInfo.expectedRoomCode)
         : liveState.roomCodes.length > 0;
+      // P0-4 (2026-05-17): compute mismatchStatus FØR deriveStatus så
+      // aggregert helse-status reflekterer mismatch-tilstand.
+      const mismatchStatus = deriveMismatchStatus({
+        expectedRoomCode: scheduleInfo.expectedRoomCode,
+        roomCodes: liveState.roomCodes,
+        scheduledGameId: scheduleInfo.scheduledGameId,
+        currentGameId: liveState.currentGameId,
+      });
       const data: HealthResponseData = {
         status: deriveStatus({
           phase: liveState.phase,
@@ -600,6 +646,7 @@ export function createPublicGameHealthRouter(
           redisHealthy,
           dbHealthy,
           lastDrawAgeMs: liveState.lastDrawAgeMs,
+          mismatchStatus,
         }),
         lastDrawAge: msToSec(liveState.lastDrawAgeMs),
         connectedClients: countClientsInRooms(io, liveState.roomCodes),
@@ -612,12 +659,7 @@ export function createPublicGameHealthRouter(
         currentGameId: liveState.currentGameId,
         drawIndex: liveState.drawIndex,
         schedulerOwner: "scheduled",
-        mismatchStatus: deriveMismatchStatus({
-          expectedRoomCode: scheduleInfo.expectedRoomCode,
-          roomCodes: liveState.roomCodes,
-          scheduledGameId: scheduleInfo.scheduledGameId,
-          currentGameId: liveState.currentGameId,
-        }),
+        mismatchStatus,
         instanceId,
         redisHealthy,
         dbHealthy,
@@ -658,6 +700,13 @@ export function createPublicGameHealthRouter(
       const engineRoomExists = liveState.roomCodes.includes(
         SPILL2_EXPECTED_ROOM_CODE,
       );
+      // P0-4 (2026-05-17): compute mismatchStatus FØR deriveStatus.
+      const mismatchStatus = deriveMismatchStatus({
+        expectedRoomCode: SPILL2_EXPECTED_ROOM_CODE,
+        roomCodes: liveState.roomCodes,
+        scheduledGameId: null,
+        currentGameId: liveState.currentGameId,
+      });
       const data: HealthResponseData = {
         status: deriveStatus({
           phase: liveState.phase,
@@ -665,6 +714,7 @@ export function createPublicGameHealthRouter(
           redisHealthy,
           dbHealthy,
           lastDrawAgeMs: liveState.lastDrawAgeMs,
+          mismatchStatus,
         }),
         lastDrawAge: msToSec(liveState.lastDrawAgeMs),
         connectedClients: countClientsInRooms(io, liveState.roomCodes),
@@ -678,12 +728,7 @@ export function createPublicGameHealthRouter(
         currentGameId: liveState.currentGameId,
         drawIndex: liveState.drawIndex,
         schedulerOwner: "perpetual",
-        mismatchStatus: deriveMismatchStatus({
-          expectedRoomCode: SPILL2_EXPECTED_ROOM_CODE,
-          roomCodes: liveState.roomCodes,
-          scheduledGameId: null,
-          currentGameId: liveState.currentGameId,
-        }),
+        mismatchStatus,
         instanceId,
         redisHealthy,
         dbHealthy,
@@ -725,6 +770,13 @@ export function createPublicGameHealthRouter(
       const engineRoomExists = liveState.roomCodes.includes(
         SPILL3_EXPECTED_ROOM_CODE,
       );
+      // P0-4 (2026-05-17): compute mismatchStatus FØR deriveStatus.
+      const mismatchStatus = deriveMismatchStatus({
+        expectedRoomCode: SPILL3_EXPECTED_ROOM_CODE,
+        roomCodes: liveState.roomCodes,
+        scheduledGameId: null,
+        currentGameId: liveState.currentGameId,
+      });
       const data: HealthResponseData = {
         status: deriveStatus({
           phase: liveState.phase,
@@ -732,6 +784,7 @@ export function createPublicGameHealthRouter(
           redisHealthy,
           dbHealthy,
           lastDrawAgeMs: liveState.lastDrawAgeMs,
+          mismatchStatus,
         }),
         lastDrawAge: msToSec(liveState.lastDrawAgeMs),
         connectedClients: countClientsInRooms(io, liveState.roomCodes),
@@ -744,12 +797,7 @@ export function createPublicGameHealthRouter(
         currentGameId: liveState.currentGameId,
         drawIndex: liveState.drawIndex,
         schedulerOwner: "perpetual",
-        mismatchStatus: deriveMismatchStatus({
-          expectedRoomCode: SPILL3_EXPECTED_ROOM_CODE,
-          roomCodes: liveState.roomCodes,
-          scheduledGameId: null,
-          currentGameId: liveState.currentGameId,
-        }),
+        mismatchStatus,
         instanceId,
         redisHealthy,
         dbHealthy,
