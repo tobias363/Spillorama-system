@@ -2,7 +2,7 @@
 name: live-room-robusthet-mandate
 description: When the user/agent works with rom-arkitektur, socket-events, draw-tick, ticket-purchase, wallet-touch fra rom-events, eller pilot-gating-tiltak (R1-R12). Also use when they mention RoomAlertingService, SocketIdempotencyStore, EngineCircuitBreakerPort, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12, BIN-810, BIN-811, BIN-812, BIN-813, BIN-814, BIN-815, BIN-816, BIN-817, BIN-818, BIN-819, BIN-820, BIN-821, BIN-822, chaos-test, failover, klient-reconnect, idempotent socket-events, clientRequestId dedup, health-endpoint per rom, alerting Slack PagerDuty, DR-runbook, Evolution Gaming-grade oppetid, 99.95%, perpetual-loop leak, per-rom resource-isolation, stuck-game-recovery, monotonic stateVersion, RoomStateStore, SerializedRoomState, scheduledGameId-persistens, isHallShared-persistens, isTestHall-persistens, pendingMiniGame-persistens, spill3PhaseState-persistens, Redis-restart-recovery, ADR-0019, ADR-0020, ADR-0022. Make sure to use this skill whenever someone touches Spill 1/2/3 live-rom-arkitektur, robusthet-tiltak, eller pilot-gating — even if they don't explicitly ask for it.
 metadata:
-  version: 1.4.0
+  version: 1.5.0
   project: spillorama
 ---
 
@@ -357,6 +357,90 @@ Symptom: Spill 2 hukommelses-leak over 24t.
 - IKKE utvide til > 4 haller før R4/R6/R9 bestått
 - IKKE forhandl ned 99.95%-mål uten Tobias-godkjenning
 
+## Klient-side recovery-arkitektur — Tre kompletterende lag
+
+Spill 1-klienten har **tre uavhengige recovery-lag** som dekker forskjellige
+failure-mønstre. Når du rør recovery-kode, FORSTÅ hvilket lag du jobber i og
+hvorfor — å fjerne ett lag eller blande deres ansvar er en arkitektur-feil.
+
+| Lag | Klasse | Trigger | Ansvar |
+|---|---|---|---|
+| **1. Disconnect-recovery** | `AutoReloadOnDisconnect` | `socketState === "disconnected"` i 30 s | Hard reload med reload-loop-counter (3 attempts / 2 min). Sikrer at en spiller med null-nett ikke står evig i feilet UI. |
+| **2. Reconnect-snapshot-replay** | `Game1ReconnectFlow` | `connectionStateChanged === "connected"` etter disconnect | Henter fersk snapshot via `socket.resumeRoom` + `getRoomState` og `bridge.applySnapshot`. Mister loader-stuck hvis begge feiler. |
+| **3. Frozen-state-supervisor** | `LiveRoomRecoverySupervisor` | Socket connected men ingen room:update/draw:new i 10s+ | Tre-tier eskalering: resume (10s) → rejoin scheduled (30s) → hard reload (60s). Deler reload-counter med lag 1 via `triggerImmediateReload()`. |
+
+### Når hvert lag fyrer
+
+**Lag 1** fyrer KUN ved faktisk socket-disconnect. Hvis socket er teknisk
+koblet men reagerer ikke (server-side heng, mellom-network-drop), fyrer
+det IKKE.
+
+**Lag 2** fyrer KUN ved RECONNECT (state-overgang `connected` etter
+`reconnecting`/`disconnected`). Hvis socket aldri har vært disconnected,
+fyrer ikke.
+
+**Lag 3** fyrer KUN når:
+- socket er `connected` (ikke `reconnecting`/`disconnected` — det er lag 1-territorium)
+- rom er aktivt (`RUNNING`/`WAITING` — ikke `LOADING`/`ENDED`)
+- siste fresh server-update er eldre enn tier-threshold
+- supervisor har ikke allerede fyrt samme eller høyere tier
+
+`markUpdateReceived()` resetter eskalering ved hver `stateChanged`/
+`numberDrawn`-event fra bridge. Server-server-roundtrip på en working
+runde holder normalt eskalering til 0.
+
+### Tier-tabellen (Lag 3)
+
+| Tier | Threshold | Aksjon | Suksess-kriterium |
+|---|---|---|---|
+| 1 | 10 s | `socket.resumeRoom` + `getRoomState` + `bridge.applySnapshot` | Snapshot levert (returnerer true) |
+| 2 | 30 s | `joinScheduledGameWithRetry` + `bridge.applySnapshot` | Nytt scheduled-rom bound + snapshot levert |
+| 3 | 60 s | `autoReloader.triggerImmediateReload()` | Page reload (deler attempts-counter med Lag 1) |
+
+Threshold er konfigurerbar i constructor for testing. Standard er 10 / 30 / 60 s.
+
+### INVARIANTER ved endringer
+
+1. **Hold lagene uavhengige.** Hvis du legger logikk fra Lag 3 inn i Lag 1,
+   ender du opp med at supervisor må re-implementere reload-loop-beskyttelse.
+   Bruk `triggerImmediateReload()` som delegasjons-API.
+2. **Eskalering-conditions SKAL gate på rom-aktivitet.** Hvis du fjerner
+   `isRoomActive`-sjekken, vil supervisor fyre tier 1 under end-of-round-
+   overlay (mens rommet er `ENDED`). Det er feil — det er ikke frozen-state.
+3. **`markUpdateReceived()` MÅ kalles fra bridge.on("stateChanged" |
+   "numberDrawn" | ...)-handlers.** Hvis du legger til en ny bridge-event som
+   indikerer fresh server-state (eks. ny `room:resync`-event), legg
+   markUpdateReceived-kall i samme handler.
+4. **Tier 3 SKAL gå via `triggerImmediateReload()`.** Ikke kall
+   `window.location.reload()` direkte — du mister reload-loop-beskyttelsen.
+5. **Telemetri SKAL fyres på hver tier-trigger.** PostHog-eventene
+   `liveroom_recovery_tier_triggered` og `liveroom_recovery_succeeded` er
+   pilot-observability. Hvis du legger til en ny tier eller endrer trigger-
+   condition, oppdater eventene.
+
+### Konsekvenser ved feilbruk
+
+- **Fjerner Lag 3:** "Frozen-state med koblet socket"-bugen kommer
+  tilbake. Spillere må manuelt reloade siden Lag 1 ikke fyrer ved
+  koblet socket og Lag 2 ikke fyrer uten disconnect-event.
+- **Setter tier 1 < 10 s:** Falske trigger på normale 5-8 s server-latenser.
+  Sentry/PostHog vil vise mange `liveroom_recovery_tier_triggered`-events
+  som faktisk ikke er recovery.
+- **Setter tier 3 < 60 s:** Reload-loop hvis backend er nede; bruker mister
+  context unødvendig. 60 s er konservativt valgt for å gi Lag 1 og Lag 2
+  to forsøk hver.
+
+### Følge-pre
+
+For fremtidige PR-er som rører recovery:
+
+- Hvis du legger til en ny event-type fra server som indikerer aktiv state →
+  legg `markUpdateReceived()`-kall i bridge-handler.
+- Hvis du endrer tier-thresholds → oppdater test-suite OG denne tabellen.
+- Hvis du legger til en ny recovery-aksjon (eks. "Tier 1.5 — re-fetch lobby") →
+  diskuter med PM først; tre tier er bevisst minimum for å holde mental
+  modell håndterbar.
+
 ## Redis room-state-serialisering — INVARIANT
 
 `apps/backend/src/store/RoomStateStore.ts` definerer `SerializedRoomState` og `SerializedGameState`. Disse er kontrakten mot Redis (`RedisRoomStateStore.persist()` kaller `serializeRoom(room)` → `JSON.stringify` → `SETEX`).
@@ -410,4 +494,5 @@ Symptom: Spill 2 hukommelses-leak over 24t.
 | 2026-05-13 | v1.1.0 — oppdatert R-status: R2/R3 PASSED, R4 infrastruktur merget, R11 circuit-breaker merget. Lagt til Bølge 1 + Bølge 2 + ADR-0019/0020/0021/0022. |
 | 2026-05-14 | v1.2.0 — lagt til "Etter-runde auto-return til lobby" seksjon (`MAX_PREPARING_ROOM_MS = 15s`-fallback) etter Tobias-rapport 2026-05-14 09:54 ("Forbereder rommet..."-spinner hang evig). |
 | 2026-05-14 | v1.3.0 — la til "Synthetic bingo-runde-test (R4-precursor)" seksjon under pilot-gating. Småskala-test som ALLTID må PASSE pre-pilot. Doc: `docs/operations/SYNTHETIC_BINGO_TEST_RUNBOOK.md`. |
+| 2026-05-17 | v1.5.0 — la til "Klient-side recovery-arkitektur — Tre kompletterende lag" seksjon. Dokumenterer `LiveRoomRecoverySupervisor` (P0-2) sin tier-tabell, conditions for at hver tier fyrer, invarianter ved endringer, og hvorfor lagene må forbli uavhengige. Inkluderer `triggerImmediateReload()`-delegasjons-API for å dele reload-loop-counter mellom Lag 1 (disconnect) og Lag 3 (supervisor tier 3). |
 | 2026-05-17 | v1.4.0 — la til "Redis room-state-serialisering — INVARIANT" seksjon. Hardened `SerializedRoomState`/`SerializedGameState` til å persistere `scheduledGameId`, `isHallShared`, `isTestHall`, `pendingMiniGame` (RoomState) + `spill3PhaseState`, `isPaused`/pause-felter, `participatingPlayerIds`, `patterns`/`patternResults`, `miniGame`/`jackpot`, `isTestGame` (GameState). Pre-hardening gikk disse tapt på Redis-restart — scheduled Spill 1 mistet binding, GoH-rom mistet isHallShared og ga HALL_MISMATCH til ikke-master-haller. |

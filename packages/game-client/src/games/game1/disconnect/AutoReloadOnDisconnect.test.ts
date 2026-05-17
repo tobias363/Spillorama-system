@@ -343,4 +343,118 @@ describe("AutoReloadOnDisconnect", () => {
 
     vi.useRealTimers();
   });
+
+  // ── Ekstern-konsulent-plan P0-2 (2026-05-17): triggerImmediateReload ──
+
+  describe("triggerImmediateReload (P0-2 LiveRoomRecoverySupervisor tier 3)", () => {
+    it("fyrer reload umiddelbart uten å vente på timer", () => {
+      const reloadFn = vi.fn();
+      const reloader = new AutoReloadOnDisconnect({
+        delayMs: 30_000,
+        reloadFn,
+        storage: makeMemoryStorage().api,
+      });
+      reloader.markConnected();
+
+      reloader.triggerImmediateReload();
+
+      expect(reloadFn).toHaveBeenCalledTimes(1);
+    });
+
+    it("er no-op før markConnected() er kalt (samme gate som armReload)", () => {
+      const reloadFn = vi.fn();
+      const reloader = new AutoReloadOnDisconnect({
+        delayMs: 30_000,
+        reloadFn,
+        storage: makeMemoryStorage().api,
+      });
+      // markConnected ikke kalt
+
+      reloader.triggerImmediateReload();
+
+      expect(reloadFn).not.toHaveBeenCalled();
+    });
+
+    it("cancel-er pågående armert reload før immediate trigger", () => {
+      vi.useFakeTimers();
+      const reloadFn = vi.fn();
+      const reloader = new AutoReloadOnDisconnect({
+        delayMs: 5_000,
+        reloadFn,
+        storage: makeMemoryStorage().api,
+      });
+      reloader.markConnected();
+
+      reloader.armReload();
+      vi.advanceTimersByTime(1_000); // halvveis til armed reload
+
+      reloader.triggerImmediateReload();
+      expect(reloadFn).toHaveBeenCalledTimes(1);
+
+      // Sørg for at den armerte timeren IKKE også fyrer.
+      vi.advanceTimersByTime(10_000);
+      expect(reloadFn).toHaveBeenCalledTimes(1);
+
+      vi.useRealTimers();
+    });
+
+    it("respekterer maxAttempts — onMaxAttemptsReached fyrer på 4. forsøk", () => {
+      const reloadFn = vi.fn();
+      const onMaxAttempts = vi.fn();
+      const memStorage = makeMemoryStorage();
+      const reloader = new AutoReloadOnDisconnect({
+        maxAttempts: 3,
+        windowMs: 60_000,
+        reloadFn,
+        onMaxAttemptsReached: onMaxAttempts,
+        storage: memStorage.api,
+        now: () => 1_000_000,
+      });
+      reloader.markConnected();
+
+      // 3 lovlige reloads
+      reloader.triggerImmediateReload();
+      reloader.triggerImmediateReload();
+      reloader.triggerImmediateReload();
+      expect(reloadFn).toHaveBeenCalledTimes(3);
+
+      // 4. — over grensen
+      reloader.triggerImmediateReload();
+      expect(reloadFn).toHaveBeenCalledTimes(3); // ikke kallet på nytt
+      expect(onMaxAttempts).toHaveBeenCalledTimes(1);
+    });
+
+    it("teller felles attempts-counter med armReload-pathen (delt sessionStorage)", () => {
+      vi.useFakeTimers();
+      const reloadFn = vi.fn();
+      const onMaxAttempts = vi.fn();
+      const memStorage = makeMemoryStorage();
+      const reloader = new AutoReloadOnDisconnect({
+        maxAttempts: 2,
+        delayMs: 1_000,
+        windowMs: 60_000,
+        reloadFn,
+        onMaxAttemptsReached: onMaxAttempts,
+        storage: memStorage.api,
+        now: () => 1_000_000,
+      });
+      reloader.markConnected();
+
+      // Først via armReload (disconnect-path)
+      reloader.armReload();
+      vi.advanceTimersByTime(1_500);
+      expect(reloadFn).toHaveBeenCalledTimes(1);
+
+      // Så via triggerImmediateReload (supervisor tier 3)
+      reloader.triggerImmediateReload();
+      expect(reloadFn).toHaveBeenCalledTimes(2);
+
+      // 3. — over grensen (delt counter)
+      reloader.triggerImmediateReload();
+      expect(reloadFn).toHaveBeenCalledTimes(2);
+      expect(onMaxAttempts).toHaveBeenCalledTimes(1);
+
+      vi.useRealTimers();
+    });
+  });
 });
