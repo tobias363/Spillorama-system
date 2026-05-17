@@ -4226,16 +4226,20 @@ Hver fix-PR auto-deleter sin branch på origin men ikke lokal worktree. Hver gan
 - Sikkerhet: UNSAFE-verdikter slettes ALDRI. UNCLEAR-stashes (squash-merge-edge-case) krever manuell vurdering. EXPLICIT-KEEP-mønstre (pre-rebase, recovery, rescue) beholdes alltid.
 - `PM_SESSION_END_CHECKLIST.md` Trinn 10 (valgfri) peker til scriptene.
 
+**Fase B.3-utvidelse (2026-05-17):** `cleanup-merged-worktrees.sh` brukte kun `git merge-base --is-ancestor` for merge-detection, som returnerer false for squash-merged branches (samme edge case som §11.27/branch-cleanup). Resultatet: 385 agent-worktrees i `.claude/worktrees/agent-*` ble klassifisert LOCKED-UNSAFE selv om PR-ene var merget. Fix: forhåndslast `gh pr list --state merged --json headRefName` (én call, 1 329 PRs cached) og krysse mot branch-navn etter `is-ancestor` feiler. Empirisk effekt: 116 worktrees reklassifisert LOCKED-UNSAFE → LOCKED-S → trygt slettbare med `--include-locked`. ~10 GB disk frigjort.
+
 **Prevention:**
 - Kjør cleanup-script ved sesjons-slutt (Trinn 10 i PM_SESSION_END_CHECKLIST)
 - Bash 3.2-kompatibel (macOS default) — bruk simple counters, ikke `declare -A`
 - For squash-merge-edge-case: bruk `gh pr list --state merged --search "head:<branch>"` for å avgjøre om en UNCLEAR-stash er trygg
+- For worktree-cleanup: kombiner `is-ancestor` med `gh pr list --state merged` cache for å fange squash-merge-tilfeller (Fase B.3-mønster).
 
 **Related:**
-- `scripts/cleanup-merged-worktrees.sh` (ny)
+- `scripts/cleanup-merged-worktrees.sh` (ny, Fase B + B.3-utvidelse)
 - `scripts/cleanup-stale-stashes.sh` (ny)
+- `scripts/cleanup-merged-branches.sh` (ny — Fase B.2)
 - `docs/operations/PM_SESSION_END_CHECKLIST.md` Trinn 10
-- `.claude/skills/pm-orchestration-pattern/SKILL.md` v1.8.0
+- `.claude/skills/pm-orchestration-pattern/SKILL.md` v1.10.0
 
 ---
 

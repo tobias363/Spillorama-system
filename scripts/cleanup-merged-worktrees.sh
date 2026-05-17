@@ -98,6 +98,36 @@ fi
 
 CURRENT_PATH="$(pwd -P)"
 
+# ---- Squash-merge cache (Fase B.3) ---------------------------------------
+#
+# `git merge-base --is-ancestor` returns false for squash-merged branches
+# fordi squash endrer commit-SHA. Det rammet 385 agent-worktrees i Fase B —
+# alle ble klassifisert som LOCKED-UNSAFE selv om PR-ene faktisk var merget.
+#
+# Fix: forhåndslast `gh pr list --state merged --json headRefName` (én call)
+# og bruk som autoritativ kilde for "branch er squash-merget".
+# Optional — hvis gh/jq mangler, hopp over (klassifisering faller tilbake
+# på is-ancestor som før).
+
+SQUASH_MERGE_CACHE_FILE=""
+if command -v gh >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+  SQUASH_MERGE_CACHE_FILE="$(mktemp)"
+  trap 'rm -f "$SQUASH_MERGE_CACHE_FILE"' EXIT
+  echo "${C_DIM}Caching merged-PR heads from GitHub (squash-merge detection)...${C_RESET}" >&2
+  gh pr list --state merged --limit 2000 --json headRefName --jq '.[].headRefName' > "$SQUASH_MERGE_CACHE_FILE" 2>/dev/null || true
+  cached_count="$(wc -l < "$SQUASH_MERGE_CACHE_FILE" | tr -d ' ')"
+  echo "${C_DIM}  ${cached_count} merged PR-heads cached${C_RESET}" >&2
+else
+  echo "${C_DIM}Note: gh/jq missing or unauth'd — squash-merge detection disabled${C_RESET}" >&2
+fi
+
+branch_is_squash_merged() {
+  local branch="$1"
+  [ -z "$SQUASH_MERGE_CACHE_FILE" ] && return 1
+  [ -z "$branch" ] && return 1
+  grep -Fxq -- "$branch" "$SQUASH_MERGE_CACHE_FILE" 2>/dev/null
+}
+
 # Parse `git worktree list --porcelain` into parallel arrays
 declare -a WT_PATHS=() WT_BRANCHES=() WT_LOCKED=() WT_DETACHED=()
 
@@ -180,10 +210,18 @@ classify_worktree() {
     return
   fi
 
-  # Check merged to main
+  # Check merged to main (regular merge — ancestor check)
   local branch_sha
   branch_sha="$(git -C "$path" rev-parse "refs/heads/${branch}" 2>/dev/null || echo "")"
   if [ -n "$branch_sha" ] && git merge-base --is-ancestor "$branch_sha" "$MAIN_REF" 2>/dev/null; then
+    if [ "$locked" = "1" ]; then echo "LOCKED-S"; else echo "SAFE"; fi
+    return
+  fi
+
+  # Check squash-merge (Fase B.3) — branch matches a merged-PR head in gh-cache.
+  # Working tree is already verified clean; squash-merge means upstream content
+  # is now in origin/main as a single commit, even though local SHAs differ.
+  if branch_is_squash_merged "$branch"; then
     if [ "$locked" = "1" ]; then echo "LOCKED-S"; else echo "SAFE"; fi
     return
   fi
