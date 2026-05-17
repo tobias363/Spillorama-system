@@ -94,15 +94,22 @@ jobs:
           fi
           echo "✓ find-skills-for-file CLI works"
 
-      - name: Rebuild SKILL_FILE_MAP.md and check it is up-to-date
+      - name: Rebuild SKILL_FILE_MAP.md and report status
         run: |
           set -euo pipefail
           node scripts/build-skill-file-map.mjs > /dev/null
           if ! git diff --exit-code docs/auto-generated/SKILL_FILE_MAP.md; then
+            # WARNING only — not blocking PR. Auto-regen-on-merge workflow
+            # picks this up after merge to main and opens auto-PR.
+            # See: .github/workflows/skill-file-map-auto-regen.yml
             echo ""
-            echo "::error::docs/auto-generated/SKILL_FILE_MAP.md is stale."
-            echo "Run locally: node scripts/build-skill-file-map.mjs"
-            echo "and commit the updated file."
-            exit 1
+            echo "::warning::docs/auto-generated/SKILL_FILE_MAP.md is stale."
+            echo ""
+            echo "Auto-regen-on-merge workflow will fix this automatically after PR merge."
+            echo "If you want to fix it now: run locally and commit:"
+            echo "  node scripts/build-skill-file-map.mjs"
+            echo ""
+            echo "(Stale map is NOT a PR blocker as of 2026-05-13 — E4 auto-regen workflow.)"
+          else
+            echo "✓ SKILL_FILE_MAP.md is current"
           fi
-          echo "✓ SKILL_FILE_MAP.md is current"
