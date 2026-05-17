@@ -25,6 +25,11 @@ import { preloadGameAssets } from "../../core/preloadGameAssets.js";
 // Brukeren beskrev: "Funket når jeg gikk inn og ut" — reload er den
 // pragmatiske recovery-metoden når socket dropper.
 import { AutoReloadOnDisconnect } from "./disconnect/AutoReloadOnDisconnect.js";
+import {
+  LiveRoomRecoverySupervisor,
+  type RecoveryContext,
+  type SocketConnectionState,
+} from "./disconnect/LiveRoomRecoverySupervisor.js";
 import { ToastNotification } from "./components/ToastNotification.js";
 import { PauseOverlay } from "./components/PauseOverlay.js";
 import { WinPopup } from "./components/WinPopup.js";
@@ -543,6 +548,122 @@ class Game1Controller implements GameController {
       autoReloader.cancelReload();
     });
 
+    // Ekstern-konsulent-plan P0-2 (2026-05-17): LiveRoomRecoverySupervisor
+    // watcher "frozen live-state med koblet socket"-scenarier som
+    // AutoReloadOnDisconnect ikke fanger (socket connected, men ingen
+    // room:update/draw:new strømmer inn).
+    //
+    // Tier 1 (10s):  socket.resumeRoom + getRoomState
+    // Tier 2 (30s):  re-fetch lobby + game1:join-scheduled
+    // Tier 3 (60s):  hard reload via autoReloader (deler attempts-counter)
+    //
+    // markUpdateReceived() kalles fra bridge.on("stateChanged"|"numberDrawn"
+    // | ...)-handlers slik at fresh server-state resetter eskalering.
+    const recoverySupervisor = new LiveRoomRecoverySupervisor({
+      getContext: (): RecoveryContext => {
+        const bridgeState = bridge.getState();
+        const status = bridgeState.gameStatus;
+        const isRoomActive = status === "RUNNING" || status === "WAITING";
+        // SpilloramaSocket.getConnectionState() finnes ikke direkte; vi
+        // utleder fra `isConnected()`. Reconnecting-state håndteres av
+        // connectionStateChanged-handler nedenfor som vil cancel-e
+        // supervisor-trigger via stale-fresh-mekanikken.
+        const socketState: SocketConnectionState = socket.isConnected()
+          ? "connected"
+          : "disconnected";
+        return {
+          socketState,
+          scheduledGameId: this.joinedScheduledGameId ?? null,
+          roomCode: this.actualRoomCode,
+          isRoomActive,
+        };
+      },
+      tryResumeFlow: async (): Promise<boolean> => {
+        // Tier 1: be socket om snapshot uten å re-join rommet. Gjenbruker
+        // ReconnectFlow-logikk via direkte resumeRoom + applySnapshot.
+        // Returner true hvis snapshot ble levert.
+        if (!this.actualRoomCode) return false;
+        try {
+          const scheduledGameId = this.joinedScheduledGameId ?? null;
+          const payload: { roomCode: string; scheduledGameId?: string } = {
+            roomCode: this.actualRoomCode,
+          };
+          if (scheduledGameId) payload.scheduledGameId = scheduledGameId;
+          const result = await socket.resumeRoom(payload);
+          if (result.ok && result.data?.snapshot) {
+            bridge.applySnapshot(result.data.snapshot);
+            return true;
+          }
+          // Fallback til getRoomState hvis resumeRoom mangler snapshot.
+          const fallback = await socket.getRoomState(payload);
+          if (fallback.ok && fallback.data?.snapshot) {
+            bridge.applySnapshot(fallback.data.snapshot);
+            return true;
+          }
+          return false;
+        } catch (err) {
+          console.warn("[LiveRoomRecovery] tier 1 resumeFlow kastet", err);
+          return false;
+        }
+      },
+      tryRejoinFlow: async (): Promise<boolean> => {
+        // Tier 2: re-join scheduled-game. LobbyStateBinding kjører eget
+        // polling-loop som henter ny state ~10s; vi trigger ikke manuell
+        // fetch fordi `fetchOnce` er private. Hvis polling allerede har
+        // pushet ny scheduled-game-id, vil delta-handler hatt mulighet
+        // til å bytte rom; vi re-bekrefter ved å kalle join på nytt.
+        try {
+          if (!this.joinedScheduledGameId) {
+            // Ingen scheduled-game-id å re-joine — la tier 3 håndtere.
+            return false;
+          }
+          const hallId = this.deps.app.getConfig()?.hallId ?? "";
+          if (!hallId) return false;
+          const result = await this.joinScheduledGameWithRetry(
+            {
+              scheduledGameId: this.joinedScheduledGameId,
+              hallId,
+              playerName: this.resolvePlayerName(),
+            },
+            "delta",
+          );
+          if (result?.ok && result.data?.snapshot) {
+            bridge.applySnapshot(result.data.snapshot);
+            return true;
+          }
+          return false;
+        } catch (err) {
+          console.warn("[LiveRoomRecovery] tier 2 rejoinFlow kastet", err);
+          return false;
+        }
+      },
+      triggerHardReload: () => {
+        // Tier 3: deler attempts-counter med AutoReloadOnDisconnect så vi
+        // ikke ender i reload-loop.
+        autoReloader.triggerImmediateReload();
+      },
+      onTierTriggered: (tier, reason, stalenessMs) => {
+        telemetry.trackEvent("liveroom_recovery_tier_triggered", {
+          tier,
+          reason,
+          stalenessMs,
+          scheduledGameId: this.joinedScheduledGameId ?? null,
+          roomCode: this.actualRoomCode || null,
+        });
+        console.warn(
+          `[LiveRoomRecovery] tier ${tier} triggered (${reason}, stale ${stalenessMs}ms)`,
+        );
+      },
+      onRecoverySucceeded: (tier, durationMs) => {
+        telemetry.trackEvent("liveroom_recovery_succeeded", {
+          tier,
+          durationMs,
+        });
+      },
+    });
+    recoverySupervisor.start();
+    this.unsubs.push(() => recoverySupervisor.stop());
+
     // PR #1247-regresjon fix (2026-05-12): hvis vi allerede er connected
     // (vanlig — vi awaiter "connected" på linje 340-346 før vi når hit),
     // markér det med en gang så armReload() ikke blokkeres på første
@@ -943,6 +1064,10 @@ class Game1Controller implements GameController {
 
     this.unsubs.push(
       bridge.on("stateChanged", (state) => {
+        // Ekstern-konsulent-plan P0-2 (2026-05-17): hver stateChange er
+        // bevis på at backend-state-strømmen er live. Reset
+        // recovery-supervisor-eskalering.
+        recoverySupervisor.markUpdateReceived();
         // Tracker (Tobias-direktiv 2026-05-12): hver stateChange er en
         // mulig sannhets-source-of-truth-endring. Track kun safe-fields
         // (roomCode, gameStatus, drawn-count) — IKKE full state-payload
@@ -983,6 +1108,9 @@ class Game1Controller implements GameController {
         this.onGameEnded(state);
       }),
       bridge.on("numberDrawn", (num, idx, state) => {
+        // Ekstern-konsulent-plan P0-2: draw:new er sterkeste bevis på
+        // live-engine. Reset recovery-supervisor.
+        recoverySupervisor.markUpdateReceived();
         tracker.track("socket.recv", {
           event: "draw:new",
           ball: num,

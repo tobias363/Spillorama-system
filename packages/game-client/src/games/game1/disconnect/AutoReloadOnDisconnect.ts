@@ -171,6 +171,31 @@ export class AutoReloadOnDisconnect {
   }
 
   /**
+   * Tier 3-fra-LiveRoomRecoverySupervisor (2026-05-17): trigger
+   * reload-or-fallback umiddelbart uten å vente på 30s-timer-en. Brukes
+   * når supervisor har konkludert at frozen-state ikke kan recovery-es
+   * via tier 1 (resume) eller tier 2 (rejoin) — vi vil hard-reload
+   * MEN med samme reload-loop-beskyttelse som ved socket-disconnect.
+   *
+   * Idempotent: tier-1/2-cancel-er pågående armert reload først så vi
+   * ikke trigger dobbel reload. Gated på `hasBeenConnected` som andre
+   * reload-trigger-paths.
+   */
+  triggerImmediateReload(): void {
+    if (!this.hasBeenConnected) {
+      // Samme gate som armReload — hindrer reload-loop hvis initial-
+      // connect feilet permanent.
+      return;
+    }
+    // Cancel pending armed reload først så ikke begge fyrer.
+    if (this.timerHandle !== null) {
+      this.clearTimeoutFn(this.timerHandle);
+      this.timerHandle = null;
+    }
+    this.executeReloadOrFallback();
+  }
+
+  /**
    * Sjekk om vi har truffet max-attempts uten å trigge reload. Brukt av
    * tester og evt. UI for å vise "tekniske problemer"-overlay før timer
    * ferdig.

@@ -5273,3 +5273,77 @@ Trygt slettbart UTEN data-tap: 2 + 5 + 240 worktrees + 52 stashes (kategorisk + 
 - P0-4: `publicGameHealth.deriveStatus` tar `mismatchStatus` (separat PR).
 - P0-5: `LobbyStateBinding.fetchOnce` AbortController med 5s timeout (separat PR).
 - P0-6: GoH 4x80 rerun med invariant-verifikasjon for V2 (Redis-roundtrip).
+
+### 2026-05-17 — PM-AI/Claude: LiveRoomRecoverySupervisor + AutoReload triggerImmediateReload (P0-2 fra ekstern-konsulent-plan)
+
+**Agent-type:** PM/self-implementation (ekstern-konsulent-rolle, fix-implementation-agent under PM-koordinering)
+**Branch:** `claude/live-room-recovery-supervisor-2026-05-17`
+**Worktree:** `/Users/tobiashaugen/Projects/Spillorama-system/.claude/worktrees/naughty-ride-0807dd`
+**Scope:** Bygg ny `LiveRoomRecoverySupervisor` som dekker "frozen live-state med koblet socket"-scenarier som verken `AutoReloadOnDisconnect` (kun fyrer ved disconnect) eller `Game1ReconnectFlow` (kun fyrer ved reconnect-event) fanger. Tre-tier eskalering: resumeRoom (10 s) → joinScheduledGameWithRetry (30 s) → hard reload via delt counter (60 s). Plan-fil P0-2.
+
+**Kodeendringer:**
+
+- `packages/game-client/src/games/game1/disconnect/LiveRoomRecoverySupervisor.ts` (ny, 285 linjer):
+  - Klasse med constructor som tar callbacks (`getContext`, `tryResumeFlow`, `tryRejoinFlow`, `triggerHardReload`) + telemetry-callbacks + test-injection for `now`/`setInterval`/`clearInterval`
+  - `start()`/`stop()` lifecycle (idempotent)
+  - `markUpdateReceived()` resetter eskalering når fresh server-data ankommer
+  - `tick()` evaluerer escalation-conditions og fyrer tier 1/2/3 ved threshold
+  - In-flight isolation hindrer overlappende tier-handlinger
+  - Fail-soft: tier-handlinger som kaster blokkerer ikke neste tick
+  - Threshold-validering i constructor (kaster hvis tier1 >= tier2 eller tier2 >= tier3)
+- `packages/game-client/src/games/game1/disconnect/LiveRoomRecoverySupervisor.test.ts` (ny, 366 linjer):
+  - 26 regresjons-tester dekker: threshold-validering, fresh-state-no-op, tier 1/2/3 trigger-conditions, in-flight isolation, gate-paths (socketState !== connected, isRoomActive = false), error-håndtering, lifecycle, full eskalerings-scenarier
+- `packages/game-client/src/games/game1/disconnect/AutoReloadOnDisconnect.ts`:
+  - Ny public-metode `triggerImmediateReload()` (linje 172-196): kjører `executeReloadOrFallback()` umiddelbart uten 30 s-timer. Gated på `hasBeenConnected`. Cancel-er pågående armert reload først. Deler sessionStorage attempts-counter med armReload-pathen.
+- `packages/game-client/src/games/game1/disconnect/AutoReloadOnDisconnect.test.ts`:
+  - 5 nye tester for `triggerImmediateReload`: umiddelbar reload, markConnected-gate, cancel-armed-reload, maxAttempts, delt counter med armReload-pathen
+- `packages/game-client/src/games/game1/Game1Controller.ts`:
+  - Import av `LiveRoomRecoverySupervisor` + `RecoveryContext` + `SocketConnectionState`
+  - Instansiering etter `autoReloader`-setup med fullt sett callbacks (getContext, tryResumeFlow, tryRejoinFlow, triggerHardReload, onTierTriggered, onRecoverySucceeded)
+  - `recoverySupervisor.start()` + `unsubs.push(() => recoverySupervisor.stop())` for cleanup
+  - `markUpdateReceived()`-kall i `bridge.on("stateChanged")` og `bridge.on("numberDrawn")`-handlers
+  - Telemetri-events `liveroom_recovery_tier_triggered` og `liveroom_recovery_succeeded` for pilot-observability
+
+**Tester kjørt:**
+
+- `npm --prefix packages/game-client run check` — TypeScript strict pass
+- `npm --prefix packages/game-client run test -- --run LiveRoomRecoverySupervisor` — 26/26 pass (424 ms)
+- `npm --prefix packages/game-client run test -- --run AutoReloadOnDisconnect` — 19/19 pass (664 ms; var 14 før, 5 nye)
+- `npm --prefix packages/game-client run test -- --run` — 1374 pass, 2 fail (pre-existing på main; bekreftet med stash + uncovered diff)
+
+**Pre-existing failures verifisert:**
+
+Verifiserte via `git stash && npm run test` på rein main at de 2 spillerklientRebuildE2E.test.ts-failures (`Test 3: 2 farger`, `Test 4: Trafikklys`) er pre-existing — IKKE forårsaket av mine endringer. Failures er om ticket-row-count i BuyPopup, helt utenfor recovery-pathen.
+
+**Dokumentasjon oppdatert:**
+
+- `.claude/skills/live-room-robusthet-mandate/SKILL.md` v1.5.0 — ny seksjon "Klient-side recovery-arkitektur — Tre kompletterende lag":
+  - Tabell over tre lag (AutoReload / ReconnectFlow / LiveRoomRecoverySupervisor) med ansvar og trigger
+  - Tier-tabellen for Lag 3 (10 s / 30 s / 60 s med suksess-kriterier)
+  - 5 INVARIANTER ved endringer (hold lagene uavhengige, gate på isRoomActive, markUpdateReceived() på alle fresh-data-events, gå via triggerImmediateReload() for tier 3, telemetri på hver tier-trigger)
+  - Konsekvenser ved feilbruk
+  - Følge-pre for fremtidige PR-er
+- `docs/engineering/PITFALLS_LOG.md` §4.11 — full forklaring av frozen-state-bugen + konsekvenser pre-fix + fix-detaljer + prevention via skill-doc. Indeks-tellere §4: 12→13, total: 188→189.
+
+**Coordination block (worktree-routine 2026-05-17):**
+
+- Fresh-main sync: `git fetch origin main --prune` + `git switch -c claude/live-room-recovery-supervisor-2026-05-17 origin/main` ved 9b834f86 (post-PR-#1569-merge).
+- Branch lane: claude.
+- Worktree: ephemeral `.claude/worktrees/naughty-ride-0807dd` (eksplisitt direktiv fra Tobias).
+- Shared files touched: `docs/engineering/PITFALLS_LOG.md` (append-only §4.11 + indeks-tellere), `docs/engineering/AGENT_EXECUTION_LOG.md` (denne entry), `.claude/skills/live-room-robusthet-mandate/SKILL.md` (knowledge-protokoll v1.5.0).
+- Coordination note: PR #1569 merget før jeg startet — ingen overlap på shared files. PRs #1565 (claude/fase-b2) og #1561 (claude/fase-b-fix) er fortsatt utenfor recovery-scope.
+
+**Læring:**
+
+- Tre uavhengige recovery-lag uten koordinator gir gap-zones. Hvert lag dekker en spesifikk failure-mode (disconnect / reconnect / frozen-state) — å fjerne ett lag eller blande deres ansvar er regresjon.
+- `triggerImmediateReload()`-API i AutoReloadOnDisconnect er en clean delegasjons-pattern: supervisor delegerer tier-3-reload uten å re-implementere reload-loop-beskyttelse. Foretrekkes over duplisert sessionStorage-counter i begge klasser.
+- Threshold-validering i constructor (kaster hvis tier1 >= tier2) er fail-fast — fanger config-feil ved boot, ikke under runtime.
+- Pre-existing test-failures bekreftes via `git stash + run + stash pop`-trick. Hvis du bare ser failure i full-suite, sjekk om de er pre-existing før du bruker tid på "fix".
+- `joinScheduledGameWithRetry` har 3 forsøk innebygget — perfekt for tier 2 fordi vi får retry-on-transient-failure gratis.
+
+**Neste steg fra plan:**
+
+- P0-3: PlayScreen `loadingTransitionDeadline` ekte setTimeout (separat PR)
+- P0-4: `publicGameHealth.deriveStatus` tar `mismatchStatus` (separat PR)
+- P0-5: `LobbyStateBinding.fetchOnce` AbortController med 5s timeout (separat PR)
+- P0-6: GoH 4x80 rerun med invariant-verifikasjon for V2 (Redis-roundtrip + frozen-state-test)

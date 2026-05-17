@@ -47,7 +47,7 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§1 Compliance & Regulatorisk](#1-compliance--regulatorisk) | 9 | 2026-05-10 |
 | [§2 Wallet & Pengeflyt](#2-wallet--pengeflyt) | 11 | 2026-05-14 |
 | [§3 Spill 1, 2, 3 arkitektur](#3-spill-1-2-3-arkitektur) | 19 | 2026-05-15 |
-| [§4 Live-rom-state](#4-live-rom-state) | 12 | 2026-05-17 |
+| [§4 Live-rom-state](#4-live-rom-state) | 13 | 2026-05-17 |
 | [§5 Git & PR-flyt](#5-git--pr-flyt) | 16 | 2026-05-15 |
 | [§6 Test-infrastruktur](#6-test-infrastruktur) | 25 | 2026-05-17 |
 | [§7 Frontend / Game-client](#7-frontend--game-client) | 47 | 2026-05-16 |
@@ -57,7 +57,7 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§11 Agent-orkestrering](#11-agent-orkestrering) | 26 | 2026-05-17 |
 | [§12 DB-resilience](#12-db-resilience) | 1 | 2026-05-14 |
 
-**Total:** 188 entries (per 2026-05-17)
+**Total:** 189 entries (per 2026-05-17)
 
 ---
 
@@ -1195,6 +1195,77 @@ WHERE id = $1
 - `apps/backend/src/game/BingoEngine.ts:1006-1042` — markRoomAsScheduled* som setter feltet
 - `.claude/skills/live-room-robusthet-mandate/SKILL.md` v1.4.0 — invariant-seksjonen
 - Ekstern-konsulent-plan 2026-05-17 P0-1
+
+### §4.11 — Klient står i "frozen live-state" når socket er teknisk koblet men ingen events strømmer (manglet supervisor før P0-2)
+
+**Severity:** P0 (pilot-blokker — UX og kunde-tillit)
+**Oppdaget:** 2026-05-17 (ekstern-konsulent-review av Spill 1 live-rom-arkitektur)
+**Status:** LØST 2026-05-17
+**Symptom:** Klient er teknisk `socket.connected === true`, men ingen `room:update`, `draw:new` eller lobby-state-update kommer inn. UI fryser i hva den fikk sist: tom loader, halvferdig pattern, eller "Venter på master"-overlay. `AutoReloadOnDisconnect` fyrer ikke fordi socket-state er `connected` (den watcher kun `disconnected`). `Game1ReconnectFlow` fyrer ikke fordi det krever en `connected`-event etter `reconnecting`/`disconnected` (state-overgang, ikke fri-tilstand).
+
+**Konsekvenser pre-fix:**
+
+- Spillere sitter i frosset UI uten feedback. Eneste recovery er manuell `window.location.reload()`.
+- Server-side stuck-watchdog (`Game1StuckGameDetectionService`, ADR-0022 Lag 2) auto-kansellerer scheduled-game etter 5 min uten draws. 5 min er en evighet for spillere; de har for lengst forlatt sesjonen.
+- Tobias-direktiv 2026-05-17: "alltid live" kan ikke godkjennes når spillere må manuelt reloade ved frosset state.
+- Pilot-skala (4 haller × 250 spillere) gir nok klienter at sannsynligheten for at minst én havner i frozen-state per kveld er stor selv om backend er stabilt 99 %.
+
+**Root cause:** Tre uavhengige recovery-lag eksisterer (`AutoReloadOnDisconnect`, `Game1ReconnectFlow`, `LoadingOverlay` soft-fallback) men ingen koordinerer dem. Hver lag dekker en spesifikk failure-mode:
+- AutoReload: faktisk socket-disconnect
+- ReconnectFlow: state-overgang `connected` etter disconnect
+- LoadingOverlay soft-fallback: viser retry-knapp etter 8 s overlay
+
+Ingen av disse fanger "socket connected, ingen events". Det er en gap-zone hvor backend er teknisk frisk men prosesser har stoppet (cron-job død, instance-suspendert mid-flight, scheduler-glitch, etc.).
+
+**Fix (2026-05-17):**
+
+Ny `LiveRoomRecoverySupervisor` i `packages/game-client/src/games/game1/disconnect/LiveRoomRecoverySupervisor.ts` med 5-sekunder-watchdog som evaluerer:
+
+1. Er socket `connected`? (Skip hvis `reconnecting`/`disconnected` — AutoReload-territorium.)
+2. Er rom aktivt? (Skip hvis `LOADING`/`ENDED`/pre-join — ikke frozen-state.)
+3. Hvor lenge siden siste fresh server-update? (`markUpdateReceived()` kalles fra `bridge.on("stateChanged" | "numberDrawn" | ...)`.)
+
+Hvis staleness > threshold OG ikke allerede fyrt høyere tier, eskaler:
+- Tier 1 (10 s): `socket.resumeRoom` + `getRoomState` → `bridge.applySnapshot`
+- Tier 2 (30 s): `joinScheduledGameWithRetry` + `bridge.applySnapshot`
+- Tier 3 (60 s): `autoReloader.triggerImmediateReload()` (deler 3-attempts-counter)
+
+`markUpdateReceived()` resetter `firedTier` til 0 — det er signalet om at recovery faktisk virket. Hvis tier-en sa "ok" men markUpdateReceived ikke kalles innen neste threshold, eskaleres til neste tier (correctly).
+
+`AutoReloadOnDisconnect` utvidet med ny public-metode `triggerImmediateReload()`:
+- Cancel-er pågående armert reload først så ikke begge fyrer
+- Kjører `executeReloadOrFallback()` umiddelbart uten 30 s-timer
+- Gated på `hasBeenConnected` som armReload (no-op før initial-connect)
+- Deler sessionStorage attempts-counter med armReload-pathen
+
+**Prevention (skill-doc invariant):**
+
+`.claude/skills/live-room-robusthet-mandate/SKILL.md` (v1.5.0) har ny seksjon "Klient-side recovery-arkitektur — Tre kompletterende lag" som dokumenterer:
+
+- Hvilke recovery-lag som finnes og hvilken failure-mode hver dekker
+- Tier-tabellen med thresholds og suksess-kriterier
+- 5 INVARIANTER ved endringer (hold lagene uavhengige, gate på `isRoomActive`, kall `markUpdateReceived()` fra alle fresh-data-events, gå via `triggerImmediateReload()` for tier 3, fyrer telemetri)
+- Konsekvenser ved feilbruk (fjerne Lag 3 reaktiverer bugen; for korte thresholds gir falske trigger)
+
+**Test-coverage (31 nye tester):**
+
+- `LiveRoomRecoverySupervisor.test.ts`: 26 tester — threshold-validering, fresh-state-no-op, tier 1/2/3 trigger-conditions, in-flight isolation, error-håndtering, lifecycle, full eskalerings-scenarier
+- `AutoReloadOnDisconnect.test.ts`: 5 nye tester for `triggerImmediateReload` — umiddelbar reload, markConnected-gate, cancel-armed-reload, maxAttempts, delt counter med armReload
+
+**Future work (out-of-scope for P0-2):**
+
+- Visibility-handler (P1-8 i ekstern-konsulent-plan): trigger `markUpdateReceived()` ved `visibilitychange → visible` for å fange tab-restore
+- LobbyStateBinding `fetchOnce()`-eksponering for tier 2 manuelt refresh (P0-5 i plan)
+- Sentry breadcrumbs for socket-state-overganger (P2-12)
+
+**Related:**
+
+- `packages/game-client/src/games/game1/disconnect/LiveRoomRecoverySupervisor.ts` — implementasjon
+- `packages/game-client/src/games/game1/disconnect/LiveRoomRecoverySupervisor.test.ts` — 26 regresjons-tester
+- `packages/game-client/src/games/game1/disconnect/AutoReloadOnDisconnect.ts:172-196` — `triggerImmediateReload()`
+- `packages/game-client/src/games/game1/Game1Controller.ts:556-651` — wiring + tier-callbacks
+- `.claude/skills/live-room-robusthet-mandate/SKILL.md` v1.5.0 — tre-lag-arkitektur
+- Ekstern-konsulent-plan 2026-05-17 P0-2
 
 ---
 
