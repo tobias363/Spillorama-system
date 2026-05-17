@@ -2,7 +2,7 @@
 name: spill1-master-flow
 description: When the user/agent works with Spill 1 master-konsoll, plan-runtime, scheduled-game lifecycle, GoH-master-rom, or hall-ready-state. Also use when they mention master-actions, GamePlanRunService, GamePlanEngineBridge, Game1MasterControlService, Game1HallReadyService, Game1TransferHallService, Game1ScheduleTickService, Game1LobbyService, GameLobbyAggregator, MasterActionService, NextGamePanel, Spill1HallStatusBox, Spill1AgentControls, plan-run-id, scheduled-game-id, currentScheduledGameId, master-hall, ekskluderte haller, "Marker Klar", "Start neste spill", master-flyt, plan-runtime-koblingen, ADR-0021, ADR-0022, stuck-game-recovery, I14, I15, I16, BIN-1018, BIN-1024, BIN-1030, BIN-1041. Make sure to use this skill whenever someone touches the master/agent UI, plan or scheduled-game services, or anything related to who controls a Spill 1 round — even if they don't explicitly ask for it.
 metadata:
-  version: 1.22.0
+  version: 1.23.0
   project: spillorama
 ---
 
@@ -1209,6 +1209,31 @@ Hvis `summary.justPlayedSlug` er `null` (legacy call-sites uten lobby-state-tilg
 - ❌ Hardkode fast timer som primær dismiss-mekanisme (eks. "dismiss etter 5s uavhengig av data"). Det er nettopp det som ga 40s-bugen.
 - ❌ Fjern legacy markRoomReady-modus ennå — eksisterende tester avhenger av den og den er partial-rollback-vei.
 
+## Scheduled `ticket:mark` — aldri via legacy BingoEngine
+
+GoH 4x80-testen 2026-05-16 viste at alle plan-runder kunne fullføre server-side (draws, pattern-eval, payouts), mens spillerklientenes `ticket:mark` hadde 164495 failures og 0 acks med `GAME_NOT_RUNNING`.
+
+Root cause: generic socket-handler `ticketEvents.ts` kalte `BingoEngine.markNumber()` for alle rom. Scheduled Spill 1 har ikke autoritativ running game i legacy `BingoEngine`; state eies av `Game1DrawEngineService` + DB (`app_game1_scheduled_games`, `app_game1_draws`, `app_game1_ticket_assignments`). Derfor så legacy-engine "ingen aktiv runde" selv mens scheduled-engine kjørte korrekt.
+
+Fix-kontrakt 2026-05-17:
+
+- `ticket:mark` går først via `Game1ScheduledTicketMarkService.validate()`.
+- Validatoren bruker in-memory room-binding (`RoomSnapshot.scheduledGameId`) for å avgjøre om rommet er scheduled Spill 1.
+- Scheduled path validerer: aktiv status (`running`/`paused`), tallet er trukket, spilleren finnes i rommet, og spillerens DB-persisted assignments inneholder tallet.
+- Validatoren cacher draw-state og per-player ticket numbers. Den må IKKE bruke full `enrichScheduledGame1RoomSnapshot()` per mark; 4x80 kan produsere hundretusener av marks.
+- Hvis rommet ikke er scheduled Spill 1 returnerer validatoren `false`, og handleren faller tilbake til legacy `BingoEngine.markNumber()` for ad-hoc/legacy-rom.
+
+Tester som beskytter:
+
+- `apps/backend/src/game/Game1ScheduledTicketMarkService.test.ts`
+- `apps/backend/src/sockets/gameEvents/ticketEvents.scheduled.test.ts`
+
+ALDRI gjør:
+
+- ❌ Ikke kall `BingoEngine.markNumber()` direkte for scheduled Spill 1.
+- ❌ Ikke hydrer full scheduled room snapshot per `ticket:mark`; det er en N+1/load-regresjon.
+- ❌ Ikke bruk server-side round completion alene som bevis for live player socket-helse; mark-acks må være >0 i GoH-runner.
+
 ### Filer
 
 - `packages/game-client/src/games/game1/components/Game1EndOfRoundOverlay.ts` — overlay-implementasjonen med data-driven modus
@@ -1273,3 +1298,4 @@ Ved tvil mellom kode og doc: **doc-en vinner**, koden må fikses. Spør Tobias f
 | 2026-05-15 | v1.20.3 — Pilot-flow CI follow-up 2: Rad-vinst-spec driver scheduled draws eksplisitt via test-only `e2e-draw-next`/`scheduledDrawNext()` fordi workflowen kjører med `JOBS_ENABLED=false`. Ikke slå på scheduler-jobs i CI for å reparere denne testen; hold tests deterministiske og dokumenter scheduled draw-driveren. PITFALLS §6.20. |
 | 2026-05-16 | v1.21.0 — GoH full-plan baseline: `scripts/dev/goh-full-plan-run.mjs` kjørte `demo-pilot-goh` med 4 haller x 20 spillere gjennom alle 13 planposisjoner. Clean run PASSED, final plan-run `status=finished`, evidence lagret i `docs/evidence/20260516-goh-full-plan-run/`. Natural-end reconcile presisert: mid-plan `completed` er normal mellom-runde-state, ikke stuck. Dokumenterer også kjente anomalies: scheduled `ticket:mark` `GAME_NOT_RUNNING`, 4 auto-resumes per runde, stale RG-ledger-reset og runner final `status=finished`-kontrakt. PITFALLS §2.11, §3.18, §6.21-§6.23. |
 | 2026-05-16 | v1.22.0 — GoH full-plan 4x80 escalation: 320 samtidige syntetiske spillere gjennom alle 13 planposisjoner. Runner PASS, 4160 purchases, 11960 ticket assignments, 0 pilot-monitor P0/P1. Dokumenterer ny Sentry N+1 på master advance/resume og fix-mønsteret `GameCatalogService.getByIds` + batch `GamePlanService.fetchItems`. Bekrefter fortsatt P1: scheduled `ticket:mark` `GAME_NOT_RUNNING` (164495 failures, 0 acks). Evidence `docs/evidence/20260516-goh-full-plan-run-4x80/`. PITFALLS §4.8 + §6.24. |
+| 2026-05-17 | v1.23.0 — Scheduled `ticket:mark` fix: generic socket-handler prøver nå `Game1ScheduledTicketMarkService.validate()` før legacy `BingoEngine.markNumber()`. Service validerer mot scheduled-game DB-state med cache og unngår full snapshot-hydrering per mark. Beskytter GoH 4x80 P1 (`GAME_NOT_RUNNING`, 164495 failures, 0 acks). Tester: `Game1ScheduledTicketMarkService.test.ts` + `ticketEvents.scheduled.test.ts`. PITFALLS §6.23 oppdatert. |
