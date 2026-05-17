@@ -2,7 +2,7 @@
 name: live-room-robusthet-mandate
 description: When the user/agent works with rom-arkitektur, socket-events, draw-tick, ticket-purchase, wallet-touch fra rom-events, eller pilot-gating-tiltak (R1-R12). Also use when they mention RoomAlertingService, SocketIdempotencyStore, EngineCircuitBreakerPort, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12, BIN-810, BIN-811, BIN-812, BIN-813, BIN-814, BIN-815, BIN-816, BIN-817, BIN-818, BIN-819, BIN-820, BIN-821, BIN-822, chaos-test, failover, klient-reconnect, idempotent socket-events, clientRequestId dedup, health-endpoint per rom, alerting Slack PagerDuty, DR-runbook, Evolution Gaming-grade oppetid, 99.95%, perpetual-loop leak, per-rom resource-isolation, stuck-game-recovery, monotonic stateVersion, RoomStateStore, SerializedRoomState, scheduledGameId-persistens, isHallShared-persistens, isTestHall-persistens, pendingMiniGame-persistens, spill3PhaseState-persistens, Redis-restart-recovery, ADR-0019, ADR-0020, ADR-0022. Make sure to use this skill whenever someone touches Spill 1/2/3 live-rom-arkitektur, robusthet-tiltak, eller pilot-gating — even if they don't explicitly ask for it.
 metadata:
-  version: 1.6.0
+  version: 1.7.0
   project: spillorama
 ---
 
@@ -357,6 +357,63 @@ Symptom: Spill 2 hukommelses-leak over 24t.
 - IKKE utvide til > 4 haller før R4/R6/R9 bestått
 - IKKE forhandl ned 99.95%-mål uten Tobias-godkjenning
 
+## Health-endpoint må reflektere mismatch-tilstand i aggregert status
+
+**INVARIANT (P0-4, 2026-05-17):** `/api/games/spill[1-3]/health` sin `status`-felt SKAL eskalere til `degraded`/`down` ved mismatch-tilstander. Hvis mismatchStatus er ikke-ok men `status` er `ok`, har ops-dashbord ingen måte å se inkonsistensen.
+
+### Hvorfor
+
+`deriveStatus()` returnerte tidligere `ok` selv når `deriveMismatchStatus()` rapporterte:
+
+- `missing_engine_room` — forventet rom finnes ikke i engine
+- `unexpected_engine_room` — engine har rom som IKKE skulle vært der (zombie/leakage)
+- `duplicate_engine_rooms` — flere rom med samme rolle (klienter splittes)
+- `scheduled_game_mismatch` — scheduledGameId ≠ currentGameId
+
+Ops-dashbord polled `data.status` og så grønt selv om engine-state var brutt. PagerDuty/Slack-alerts ble ikke triggert. Operatører som måtte sjekke `data.mismatchStatus`-feltet eksplisitt for å fange invariants — i praksis aldri gjort.
+
+### Eskalerings-tabell (etter P0-4)
+
+| mismatchStatus | Status (DB+Redis healthy, aktiv runde) | Status (DB+Redis healthy, idle inn åpningstid) | Status (DB down) |
+|---|---|---|---|
+| `ok` | ok | ok | down |
+| `missing_engine_room` | **degraded** | **degraded** | down |
+| `duplicate_engine_rooms` | **degraded** | **degraded** | down |
+| `scheduled_game_mismatch` | **degraded** | **degraded** | down |
+| `unexpected_engine_room` | **down** | **down** | down |
+
+`unexpected_engine_room` får down (ikke degraded) fordi det indikerer aktiv routing-leak — klienter kan bli rute til feil rom.
+
+### Beslutnings-rekkefølge i `deriveStatus`
+
+1. `!dbHealthy` → down (DB er hovedavhengighet)
+2. `unexpected_engine_room` → down (zombie/leakage er alvorlig)
+3. Aktiv runde + `!redisHealthy` → degraded
+4. Aktiv runde + stale draw (> 30s) → degraded
+5. Aktiv runde + mismatch ≠ ok → degraded
+6. Idle + utenfor åpningstid → down (forventet stengt)
+7. Idle innenfor åpningstid + `!redisHealthy` → degraded
+8. Idle innenfor åpningstid + mismatch ≠ ok → degraded
+9. Else → ok
+
+### Hvor å oppdatere
+
+Hvis du legger til en ny `MismatchStatus`-verdi i `apps/backend/src/routes/publicGameHealth.ts`, SKAL du:
+
+1. Oppdatere `deriveMismatchStatus()` til å returnere den nye verdien
+2. Bestemme om den nye verdien skal gi `degraded` eller `down`
+3. Legge til regresjons-test i `publicGameHealth.test.ts`
+4. Oppdatere eskalerings-tabellen i denne skill-doc-en
+
+### Hvorfor mismatch ikke gir down hver gang
+
+`missing_engine_room` (forventet rom mangler) under aktiv runde KUNNE være down, men:
+- Spill 2/3 perpetual-loop som ikke har spawnet rom enda er en transient tilstand
+- Backend kan ofte recovery-e seg selv via `PerpetualRoundService.spawnFirstRoundIfNeeded()`
+- `down` ville utløse PagerDuty unødvendig
+
+Konservativt valg: `degraded` for de fleste mismatches; `down` reservert for `unexpected_engine_room` (zombie) og `dbHealthy=false`.
+
 ## PlayScreen loader-transition — alle wall-clock-deadlines må ha ekte timer
 
 **INVARIANT (P0-3, 2026-05-17):** Hver wall-clock-deadline i klient-koden som styrer UI-state SKAL ha en faktisk `setTimeout`-trigger ved siden av, ellers står state-en evig hvis update-loopen stopper.
@@ -540,6 +597,7 @@ For fremtidige PR-er som rører recovery:
 | 2026-05-13 | v1.1.0 — oppdatert R-status: R2/R3 PASSED, R4 infrastruktur merget, R11 circuit-breaker merget. Lagt til Bølge 1 + Bølge 2 + ADR-0019/0020/0021/0022. |
 | 2026-05-14 | v1.2.0 — lagt til "Etter-runde auto-return til lobby" seksjon (`MAX_PREPARING_ROOM_MS = 15s`-fallback) etter Tobias-rapport 2026-05-14 09:54 ("Forbereder rommet..."-spinner hang evig). |
 | 2026-05-14 | v1.3.0 — la til "Synthetic bingo-runde-test (R4-precursor)" seksjon under pilot-gating. Småskala-test som ALLTID må PASSE pre-pilot. Doc: `docs/operations/SYNTHETIC_BINGO_TEST_RUNBOOK.md`. |
+| 2026-05-17 | v1.7.0 — la til "Health-endpoint må reflektere mismatch-tilstand i aggregert status" seksjon. Dokumenterer P0-4-fixet hvor `deriveStatus()` nå tar `mismatchStatus` som input slik at `unexpected_engine_room` → down og andre mismatches → degraded. Pre-fix returnerte alltid `ok` ved mismatch — ops-dashbord så grønt selv ved brutt engine-state. |
 | 2026-05-17 | v1.6.0 — la til "PlayScreen loader-transition — alle wall-clock-deadlines må ha ekte timer" seksjon. Dokumenterer `LoadingTransitionController`-mønsteret (P0-3) og hvorfor klient-side wall-clock-deadlines må kombineres med faktisk `setTimeout`-trigger for å overleve frozen-state hvor `update()`-loopen stopper. |
 | 2026-05-17 | v1.5.0 — la til "Klient-side recovery-arkitektur — Tre kompletterende lag" seksjon. Dokumenterer `LiveRoomRecoverySupervisor` (P0-2) sin tier-tabell, conditions for at hver tier fyrer, invarianter ved endringer, og hvorfor lagene må forbli uavhengige. Inkluderer `triggerImmediateReload()`-delegasjons-API for å dele reload-loop-counter mellom Lag 1 (disconnect) og Lag 3 (supervisor tier 3). |
 | 2026-05-17 | v1.4.0 — la til "Redis room-state-serialisering — INVARIANT" seksjon. Hardened `SerializedRoomState`/`SerializedGameState` til å persistere `scheduledGameId`, `isHallShared`, `isTestHall`, `pendingMiniGame` (RoomState) + `spill3PhaseState`, `isPaused`/pause-felter, `participatingPlayerIds`, `patterns`/`patternResults`, `miniGame`/`jackpot`, `isTestGame` (GameState). Pre-hardening gikk disse tapt på Redis-restart — scheduled Spill 1 mistet binding, GoH-rom mistet isHallShared og ga HALL_MISMATCH til ikke-master-haller. |

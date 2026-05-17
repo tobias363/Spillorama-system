@@ -43,6 +43,7 @@ test("deriveStatus: dbHealthy=false → down (uansett alt annet)", () => {
     redisHealthy: true,
     dbHealthy: false,
     lastDrawAgeMs: 0,
+    mismatchStatus: "ok",
   });
   assert.equal(result, "down");
 });
@@ -54,6 +55,7 @@ test("deriveStatus: aktiv runde + redis nede → degraded", () => {
     redisHealthy: false,
     dbHealthy: true,
     lastDrawAgeMs: 5000,
+    mismatchStatus: "ok",
   });
   assert.equal(result, "degraded");
 });
@@ -65,6 +67,7 @@ test("deriveStatus: aktiv runde + stale draw (> threshold) → degraded", () => 
     redisHealthy: true,
     dbHealthy: true,
     lastDrawAgeMs: (DRAW_STALE_THRESHOLD_SEC + 1) * 1000,
+    mismatchStatus: "ok",
   });
   assert.equal(result, "degraded");
 });
@@ -76,6 +79,7 @@ test("deriveStatus: aktiv runde + fresh draw + alt healthy → ok", () => {
     redisHealthy: true,
     dbHealthy: true,
     lastDrawAgeMs: 1000,
+    mismatchStatus: "ok",
   });
   assert.equal(result, "ok");
 });
@@ -87,6 +91,7 @@ test("deriveStatus: paused-fase regnes som aktiv (ingen stale-check)", () => {
     redisHealthy: true,
     dbHealthy: true,
     lastDrawAgeMs: (DRAW_STALE_THRESHOLD_SEC + 100) * 1000,
+    mismatchStatus: "ok",
   });
   // Paused og redis ok → ok (stale-check gjelder bare running)
   assert.equal(result, "ok");
@@ -99,6 +104,7 @@ test("deriveStatus: idle utenfor åpningstid → down", () => {
     redisHealthy: true,
     dbHealthy: true,
     lastDrawAgeMs: null,
+    mismatchStatus: "ok",
   });
   assert.equal(result, "down");
 });
@@ -110,6 +116,7 @@ test("deriveStatus: idle innenfor åpningstid + redis nede → degraded", () => 
     redisHealthy: false,
     dbHealthy: true,
     lastDrawAgeMs: null,
+    mismatchStatus: "ok",
   });
   assert.equal(result, "degraded");
 });
@@ -121,6 +128,7 @@ test("deriveStatus: idle innenfor åpningstid + alt healthy → ok", () => {
     redisHealthy: true,
     dbHealthy: true,
     lastDrawAgeMs: null,
+    mismatchStatus: "ok",
   });
   assert.equal(result, "ok");
 });
@@ -132,8 +140,160 @@ test("deriveStatus: finished-fase oppfører seg som idle (ingen aktiv runde)", (
     redisHealthy: true,
     dbHealthy: true,
     lastDrawAgeMs: 2000,
+    mismatchStatus: "ok",
   });
   assert.equal(result, "ok");
+});
+
+// ── P0-4 (ekstern-konsulent-plan 2026-05-17) — mismatchStatus-gated branches ──
+//
+// deriveStatus tar nå `mismatchStatus` som input. Prior to P0-4 rapportertes
+// mismatchStatus i payload men inngikk IKKE i aggregert status — ops-dashbord
+// som pollet `status`-feltet så grønt selv når invariants var brutt.
+
+test("deriveStatus: unexpected_engine_room → down (zombie-rom-leakage)", () => {
+  // Engine har et rom som IKKE skulle vært der. Det er en routing-leak
+  // som potensielt sender klienter til feil rom — ops må alarmeres.
+  const result = deriveStatus({
+    phase: "running",
+    withinOpeningHours: true,
+    redisHealthy: true,
+    dbHealthy: true,
+    lastDrawAgeMs: 1000,
+    mismatchStatus: "unexpected_engine_room",
+  });
+  assert.equal(result, "down");
+});
+
+test("deriveStatus: unexpected_engine_room overrider alt unntatt dbHealthy=false", () => {
+  // Selv om alt annet er friskt — zombie-rom er alvorlig nok til down.
+  const result = deriveStatus({
+    phase: "idle",
+    withinOpeningHours: true,
+    redisHealthy: true,
+    dbHealthy: true,
+    lastDrawAgeMs: null,
+    mismatchStatus: "unexpected_engine_room",
+  });
+  assert.equal(result, "down");
+});
+
+test("deriveStatus: dbHealthy=false vinner over unexpected_engine_room", () => {
+  // DB-down er fortsatt høyeste prioritet — uansett mismatch.
+  const result = deriveStatus({
+    phase: "running",
+    withinOpeningHours: true,
+    redisHealthy: true,
+    dbHealthy: false,
+    lastDrawAgeMs: 1000,
+    mismatchStatus: "unexpected_engine_room",
+  });
+  assert.equal(result, "down");
+});
+
+test("deriveStatus: aktiv runde + missing_engine_room → degraded", () => {
+  // Plan-runtime forventer rom som engine ikke har — state-inkonsistens.
+  const result = deriveStatus({
+    phase: "running",
+    withinOpeningHours: true,
+    redisHealthy: true,
+    dbHealthy: true,
+    lastDrawAgeMs: 1000,
+    mismatchStatus: "missing_engine_room",
+  });
+  assert.equal(result, "degraded");
+});
+
+test("deriveStatus: aktiv runde + scheduled_game_mismatch → degraded", () => {
+  // currentGameId !== scheduledGameId — klienter henter snapshot for feil spill.
+  const result = deriveStatus({
+    phase: "running",
+    withinOpeningHours: true,
+    redisHealthy: true,
+    dbHealthy: true,
+    lastDrawAgeMs: 1000,
+    mismatchStatus: "scheduled_game_mismatch",
+  });
+  assert.equal(result, "degraded");
+});
+
+test("deriveStatus: aktiv runde + duplicate_engine_rooms → degraded", () => {
+  // Flere rom med samme rolle — klienter splittes på tvers.
+  const result = deriveStatus({
+    phase: "running",
+    withinOpeningHours: true,
+    redisHealthy: true,
+    dbHealthy: true,
+    lastDrawAgeMs: 1000,
+    mismatchStatus: "duplicate_engine_rooms",
+  });
+  assert.equal(result, "degraded");
+});
+
+test("deriveStatus: idle innenfor åpningstid + missing_engine_room → degraded", () => {
+  // Spill 2/3 perpetual-loop som ikke har spawnet rom enda mens vinduet er åpent.
+  const result = deriveStatus({
+    phase: "idle",
+    withinOpeningHours: true,
+    redisHealthy: true,
+    dbHealthy: true,
+    lastDrawAgeMs: null,
+    mismatchStatus: "missing_engine_room",
+  });
+  assert.equal(result, "degraded");
+});
+
+test("deriveStatus: idle + duplicate_engine_rooms → degraded", () => {
+  const result = deriveStatus({
+    phase: "idle",
+    withinOpeningHours: true,
+    redisHealthy: true,
+    dbHealthy: true,
+    lastDrawAgeMs: null,
+    mismatchStatus: "duplicate_engine_rooms",
+  });
+  assert.equal(result, "degraded");
+});
+
+test("deriveStatus: idle utenfor åpningstid + mismatch → fortsatt down (utenfor er forventet stengt)", () => {
+  // Utenfor åpningstid er "down" det forventede svaret. Mismatch i denne
+  // tilstanden er typisk leftover-rom som blir ryddet av neste cleanup.
+  const result = deriveStatus({
+    phase: "idle",
+    withinOpeningHours: false,
+    redisHealthy: true,
+    dbHealthy: true,
+    lastDrawAgeMs: null,
+    mismatchStatus: "missing_engine_room",
+  });
+  assert.equal(result, "down");
+});
+
+test("deriveStatus: stale draw + mismatch — degraded fra stale-check uavhengig av mismatch", () => {
+  // Stale-check kommer før mismatch-check i aktiv runde. Begge gir degraded;
+  // verifiserer at vi ikke regreserer til ok hvis mismatch tilfeldigvis er ok.
+  const result = deriveStatus({
+    phase: "running",
+    withinOpeningHours: true,
+    redisHealthy: true,
+    dbHealthy: true,
+    lastDrawAgeMs: (DRAW_STALE_THRESHOLD_SEC + 5) * 1000,
+    mismatchStatus: "duplicate_engine_rooms",
+  });
+  assert.equal(result, "degraded");
+});
+
+test("deriveStatus: paused + missing_engine_room → degraded", () => {
+  // Paused regnes som aktiv runde. Mismatch → degraded.
+  const result = deriveStatus({
+    phase: "paused",
+    withinOpeningHours: true,
+    redisHealthy: true,
+    dbHealthy: true,
+    lastDrawAgeMs: 1000,
+    mismatchStatus: "missing_engine_room",
+  });
+  assert.equal(result, "degraded");
 });
 
 test("phaseFromRoomStatus: WAITING → idle, RUNNING → running, ENDED → finished", () => {
@@ -498,9 +658,13 @@ test("integration: GET /api/games/spill2/health → bruker Spill2Config + health
     };
     assert.equal(body.ok, true);
     assert.equal(body.data.nextScheduledStart, null);
-    // Spill 2 stub returnerer null/null åpningstider → alltid åpent → ok.
+    // Spill 2 stub returnerer null/null åpningstider → alltid åpent.
     assert.equal(body.data.withinOpeningHours, true);
-    assert.equal(body.data.status, "ok");
+    // P0-4 (2026-05-17): perpetual loop som ikke har spawnet rom enda
+    // innenfor åpningstid → mismatch (missing_engine_room) → degraded.
+    // Tidligere ignorerte deriveStatus mismatch → falsk grønt fra status-
+    // endepunktet selv om engine-state var inkonsistent.
+    assert.equal(body.data.status, "degraded");
     assert.equal(body.data.authority, "perpetual-engine");
     assert.equal(body.data.expectedRoomCode, SPILL2_EXPECTED_ROOM_CODE);
     assert.equal(body.data.engineRoomExists, false);
@@ -535,7 +699,9 @@ test("integration: GET /api/games/spill3/health → bruker Spill3Config", async 
     assert.equal(body.ok, true);
     // Spill 3 stub returnerer 00:00-23:59 → alltid åpent.
     assert.equal(body.data.withinOpeningHours, true);
-    assert.equal(body.data.status, "ok");
+    // P0-4 (2026-05-17): se Spill 2 ovenfor for samme begrunnelse —
+    // missing_engine_room innenfor åpningstid → degraded.
+    assert.equal(body.data.status, "degraded");
     assert.equal(body.data.expectedRoomCode, SPILL3_EXPECTED_ROOM_CODE);
     assert.equal(body.data.schedulerOwner, "perpetual");
     assert.equal(body.data.mismatchStatus, "missing_engine_room");

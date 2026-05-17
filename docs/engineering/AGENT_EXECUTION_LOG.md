@@ -5426,3 +5426,64 @@ PlayScreen extends Pixi Container → kan ikke instansieres i unit-test uten Pix
 - P0-4: `publicGameHealth.deriveStatus` tar `mismatchStatus` (separat PR)
 - P0-5: `LobbyStateBinding.fetchOnce` AbortController med 5s timeout (separat PR)
 - P0-6: GoH 4x80 rerun med invariant-verifikasjon for V2 (Redis-roundtrip + frozen-state-test)
+
+### 2026-05-17 — PM-AI/Claude: deriveStatus tar mismatchStatus — health-endpoint reflekterer engine-state-inkonsistens (P0-4 fra ekstern-konsulent-plan)
+
+**Agent-type:** PM/self-implementation (ekstern-konsulent-rolle)
+**Branch:** `claude/public-health-mismatch-status-2026-05-17`
+**Worktree:** `/Users/tobiashaugen/Projects/Spillorama-system/.claude/worktrees/naughty-ride-0807dd`
+**Scope:** `/api/games/spill[1-3]/health` rapporterte `mismatchStatus` i payload, men `deriveStatus()` ignorerte det helt. Ops-dashbord som pollet `data.status` så grønt selv ved brutt engine-state (zombie/leakage-rom, scheduled-game-mismatch, duplicate-rom). PagerDuty/Slack-alerts ble ikke triggert. Plan-fil P0-4.
+
+**Kodeendringer:**
+
+- `apps/backend/src/routes/publicGameHealth.ts`:
+  - `deriveStatus()`-signatur utvidet med `mismatchStatus: MismatchStatus`-parameter
+  - Ny logikk-rekkefølge: dbHealthy → unexpected_engine_room → aktiv runde-sjekker → idle-sjekker → mismatch-eskalering
+  - `unexpected_engine_room` → down (zombie/leakage er alvorlig)
+  - Andre mismatches (missing/duplicate/scheduled_game_mismatch) → degraded
+  - 3 call-sites (Spill 1, 2, 3) refaktorert til å beregne `mismatchStatus` ÉN gang og passe inn til både `deriveStatus()` og payload-felt (eliminerte duplisert `deriveMismatchStatus()`-kall)
+- `apps/backend/src/routes/__tests__/publicGameHealth.test.ts`:
+  - 11 nye tester for mismatch-gated branches (alle MismatchStatus-verdier × phase × dbHealthy-kombinasjoner)
+  - 8 eksisterende deriveStatus-tester oppdatert med `mismatchStatus: "ok"` (default for backwards-compat)
+  - 2 integration-tester (Spill 2/3 stub uten spawn) oppdatert fra `status: ok` til `status: degraded` — det er korrekt oppførsel post-fix
+
+**Tester kjørt:**
+
+- `npm --prefix apps/backend run check` — TypeScript strict pass
+- `LOG_LEVEL=warn npx tsx --test apps/backend/src/routes/__tests__/publicGameHealth.test.ts` — 37/37 pass (var 26; +11 nye)
+- `LOG_LEVEL=warn npm --prefix apps/backend run test` — 11482 pass (var 11471; +11 nye), 0 fail, 140 skipped, 1 todo
+
+**Eskalerings-tabell:**
+
+| mismatchStatus | DB+Redis healthy, aktiv runde | DB+Redis healthy, idle inn åpningstid | DB down |
+|---|---|---|---|
+| `ok` | ok | ok | down |
+| `missing_engine_room` | **degraded** | **degraded** | down |
+| `duplicate_engine_rooms` | **degraded** | **degraded** | down |
+| `scheduled_game_mismatch` | **degraded** | **degraded** | down |
+| `unexpected_engine_room` | **down** | **down** | down |
+
+**Dokumentasjon oppdatert:**
+
+- `.claude/skills/live-room-robusthet-mandate/SKILL.md` v1.7.0 — ny seksjon "Health-endpoint må reflektere mismatch-tilstand i aggregert status" med eskalerings-tabell + invariant for nye MismatchStatus-verdier (krav: bestem degraded vs down, legg til test, oppdater tabell)
+- `docs/engineering/PITFALLS_LOG.md` §4.13: full forklaring av health-mismatch-bugen + fix-detaljer + migreringspath. Indeks oppdatert (§4: 14→15, total: 190→191).
+
+**Coordination block (worktree-routine 2026-05-17):**
+
+- Fresh-main sync: `git fetch origin main --prune` + `git switch -c claude/public-health-mismatch-status-2026-05-17 origin/main` ved fedabc06 (post-PR-#1571-merge).
+- Branch lane: claude.
+- Worktree: ephemeral `.claude/worktrees/naughty-ride-0807dd`.
+- Shared files touched: `docs/engineering/PITFALLS_LOG.md` (append-only §4.13 + indeks), `docs/engineering/AGENT_EXECUTION_LOG.md` (denne entry), `.claude/skills/live-room-robusthet-mandate/SKILL.md` (knowledge-protokoll v1.7.0).
+- Coordination note: PR #1571 (P0-3) merget før jeg startet — ingen overlap.
+
+**Læring:**
+
+- Health-endpoint-fix er primært en observabilitet-fix, ikke en runtime-fix. Engine-staten endrer seg ikke — kun hvordan ops ser den. Men det er like viktig: en utløst alarm sparer 30 min undersøkelse.
+- Eskalerings-tabell er en god måte å dokumentere policy. Hver MismatchStatus-verdi har en eksplisitt severity. Nye verdier MÅ legges til i tabellen + tester.
+- Refaktor til å beregne mismatchStatus én gang og bruke samme verdi i både `deriveStatus()` og payload — bedre enn å kalle `deriveMismatchStatus()` to ganger. Sparer DB/engine-state-lookups på fast-path.
+- Integration-tester som testet pre-fix-behavior (`status: ok` med `missing_engine_room`) dokumenterte BUGGEN, ikke den korrekte oppførselen. Oppdatert dem til ny korrekt verdi.
+
+**Neste steg fra plan:**
+
+- P0-5: `LobbyStateBinding.fetchOnce` AbortController med 5s timeout (separat PR)
+- P0-6: GoH 4x80 rerun med invariant-verifikasjon for V2 (Redis-roundtrip + frozen-state-test)
