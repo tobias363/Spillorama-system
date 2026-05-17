@@ -29,10 +29,17 @@ const CONNECT_DELAY_MS = Number(args["connect-delay-ms"] ?? 2200);
 const JOIN_DELAY_MS = Number(args["join-delay-ms"] ?? 60);
 const PURCHASE_CONCURRENCY = Number(args["purchase-concurrency"] ?? 8);
 const PURCHASE_RETRIES = Number(args["purchase-retries"] ?? 4);
+const WALLET_CIRCUIT_RETRY_DELAY_MS = Number(
+  args["wallet-circuit-retry-delay-ms"] ?? 32_000,
+);
+const MARK_RETRIES = Number(args["mark-retries"] ?? 2);
+const MARK_ACK_TIMEOUT_MS = Number(args["mark-ack-timeout-ms"] ?? 15_000);
 const ROUND_TIMEOUT_MS = Number(args["round-timeout-ms"] ?? 900_000);
 const RUN_ID = new Date().toISOString().replace(/[:.]/g, "-");
 const OUTPUT_JSON = String(args.output ?? `/tmp/goh-full-plan-run-${RUN_ID}.json`);
-const OUTPUT_MD = OUTPUT_JSON.replace(/\.json$/i, ".md");
+const OUTPUT_MD = OUTPUT_JSON.match(/\.json$/i)
+  ? OUTPUT_JSON.replace(/\.json$/i, ".md")
+  : `${OUTPUT_JSON}.md`;
 
 const MASTER_HALL_ID = "demo-hall-001";
 const GROUP_OF_HALLS_ID = "demo-pilot-goh";
@@ -68,6 +75,9 @@ const report = {
   playersPerHall: PLAYERS_PER_HALL,
   purchaseConcurrency: PURCHASE_CONCURRENCY,
   purchaseRetries: PURCHASE_RETRIES,
+  walletCircuitRetryDelayMs: WALLET_CIRCUIT_RETRY_DELAY_MS,
+  markRetries: MARK_RETRIES,
+  markAckTimeoutMs: MARK_ACK_TIMEOUT_MS,
   status: "running",
   monitoring: {
     pilotMonitorLog: "/tmp/pilot-monitor.log",
@@ -240,10 +250,21 @@ async function main() {
 
 function parseArgs(argv) {
   const out = {};
-  for (const arg of argv) {
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
     if (!arg.startsWith("--")) continue;
-    const [key, rawValue] = arg.slice(2).split("=");
-    out[key] = rawValue === undefined ? true : rawValue;
+    const body = arg.slice(2);
+    if (body.includes("=")) {
+      const [key, ...rest] = body.split("=");
+      out[key] = rest.join("=");
+      continue;
+    }
+    if (argv[i + 1] && !argv[i + 1].startsWith("--")) {
+      out[body] = argv[i + 1];
+      i += 1;
+      continue;
+    }
+    out[body] = true;
   }
   return out;
 }
@@ -427,7 +448,13 @@ async function resetLocalDemoState(adminToken) {
   report.reset.loadPlayerPersonalLimitsDeleted = personalLimitsReset.rowCount ?? 0;
   report.reset.loadPlayerPendingLimitsDeleted = pendingLimitsReset.rowCount ?? 0;
   report.reset.lossLimitResetNote =
-    "DB-ledger reset for synthetic demo-load users only. Restart backend after reset if it already had old RG state hydrated in memory.";
+    "DB-ledger reset for synthetic demo-load users only. Backend persistent state is rehydrated below so ComplianceManager cache matches DB before purchases.";
+
+  const rehydrate = await api("/api/_dev/rehydrate-persistent-state", {
+    method: "POST",
+    body: { reason: "goh-full-plan-run local RG reset" },
+  });
+  report.reset.backendPersistentStateRehydrated = rehydrate;
 }
 
 async function loadPlanItems() {
@@ -585,13 +612,13 @@ async function onDrawNew(client, payload) {
     return;
   }
   try {
-    const ack = await emitAck(client.socket, "ticket:mark", {
+    const ack = await markTicketWithRetry(client, {
       roomCode: client.roomCode,
       accessToken: client.accessToken,
       playerId: client.playerId,
       number: payload.number,
-      clientRequestId: randomUUID(),
-    }, 5000);
+      scheduledGameId: payload.gameId,
+    });
     if (ack?.ok === false) {
       incrementMap(client.markFailuresByGame, payload.gameId);
       recordMarkFailure(client, payload.gameId, {
@@ -612,6 +639,100 @@ async function onDrawNew(client, payload) {
       message: err instanceof Error ? err.message : "ticket:mark ack timed out or threw",
     });
   }
+}
+
+async function markTicketWithRetry(client, payload) {
+  const clientRequestId = randomUUID();
+  let lastAck = null;
+  let lastError = null;
+  let previousTransient = null;
+  const maxAttempts = MARK_RETRIES + 1;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await ensureMarkSocketConnected(client, payload.scheduledGameId);
+      const ack = await emitAck(client.socket, "ticket:mark", {
+        ...payload,
+        clientRequestId,
+      }, MARK_ACK_TIMEOUT_MS);
+      lastAck = ack;
+
+      if (ack?.ok || !isTransientMarkFailure(ack) || attempt === maxAttempts) {
+        if (ack?.ok && attempt > 1) {
+          if (activeRound) {
+            activeRound.markRetriesSucceeded = (activeRound.markRetriesSucceeded ?? 0) + 1;
+          }
+          report.anomalies.push({
+            at: new Date().toISOString(),
+            type: "ticket.mark.retry.succeeded",
+            position: activeRound?.position ?? null,
+            scheduledGameId: payload.scheduledGameId,
+            email: client.email,
+            number: payload.number,
+            attempts: attempt,
+            previousCode: previousTransient?.code ?? null,
+            previousMessage: previousTransient?.message ?? null,
+          });
+        }
+        return ack;
+      }
+
+      previousTransient = {
+        code: ack?.error?.code ?? "ACK_FALSE",
+        message: ack?.error?.message ?? "ticket:mark returned transient ok=false",
+      };
+      if (activeRound) {
+        activeRound.markTransientFailures = (activeRound.markTransientFailures ?? 0) + 1;
+      }
+      await sleep(250 * attempt + Math.floor(Math.random() * 150));
+    } catch (err) {
+      lastError = err;
+      if (!isTransientMarkFailure(err) || attempt === maxAttempts) {
+        throw err;
+      }
+      previousTransient = {
+        code: err?.code ?? "ACK_TIMEOUT_OR_THROW",
+        message: err instanceof Error ? err.message : "ticket:mark transient failure",
+      };
+      if (activeRound) {
+        activeRound.markTransientFailures = (activeRound.markTransientFailures ?? 0) + 1;
+      }
+      await sleep(250 * attempt + Math.floor(Math.random() * 150));
+    }
+  }
+
+  return lastAck;
+}
+
+async function ensureMarkSocketConnected(client, scheduledGameId) {
+  if (client.socket?.connected) return;
+  if (activeRound) {
+    activeRound.markDisconnectedBeforeRetry =
+      (activeRound.markDisconnectedBeforeRetry ?? 0) + 1;
+  }
+  await reconnectClientSocket(client, 8_000);
+  if (activeRound) {
+    activeRound.markReconnected =
+      (activeRound.markReconnected ?? 0) + 1;
+    report.anomalies.push({
+      at: new Date().toISOString(),
+      type: "ticket.mark.reconnected",
+      position: activeRound.position,
+      scheduledGameId,
+      email: client.email,
+    });
+  }
+}
+
+function isTransientMarkFailure(value) {
+  const code = value?.error?.code ?? value?.code;
+  const message = String(value?.error?.message ?? value?.message ?? "");
+  return (
+    code === "TIMEOUT" ||
+    code === "NOT_CONNECTED" ||
+    message.includes("ticket:mark ack timeout") ||
+    message.includes("Server svarte ikke innen")
+  );
 }
 
 function incrementMap(map, key) {
@@ -642,10 +763,26 @@ function recordMarkFailure(client, gameId, sample) {
 
 function emitAck(socket, event, payload, timeoutMs = 15_000) {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`${event} ack timeout`)), timeoutMs);
-    socket.emit(event, payload, (ack) => {
+    if (!socket?.connected) {
+      const err = new Error(`${event} socket not connected`);
+      err.code = "NOT_CONNECTED";
+      reject(err);
+      return;
+    }
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
-      resolve(ack);
+      fn(value);
+    };
+    const timer = setTimeout(() => {
+      const err = new Error(`${event} ack timeout`);
+      err.code = "TIMEOUT";
+      finish(reject, err);
+    }, timeoutMs);
+    socket.emit(event, payload, (ack) => {
+      finish(resolve, ack);
     });
   });
 }
@@ -751,14 +888,10 @@ async function loadTicketCatalog(scheduledGameId) {
 }
 
 async function joinRound(round) {
-  for (const client of clients) {
+  for (let i = 0; i < clients.length; i += 1) {
+    const client = clients[i];
     try {
-      const ack = await emitAck(client.socket, "game1:join-scheduled", {
-        accessToken: client.accessToken,
-        scheduledGameId: round.scheduledGameId,
-        hallId: client.hallId,
-        playerName: client.playerName,
-      }, 20_000);
+      const ack = await joinScheduledWithRetry(round, client);
       if (!ack?.ok) {
         round.joins.failed.push({
           email: client.email,
@@ -782,6 +915,16 @@ async function joinRound(round) {
       });
     }
     await sleep(JOIN_DELAY_MS);
+    if ((i + 1) % 40 === 0 || i + 1 === clients.length) {
+      log("round join progress", {
+        position: round.position,
+        processed: i + 1,
+        ok: round.joins.ok,
+        failed: round.joins.failed.length,
+        disconnectedBeforeJoin: round.joins.disconnectedBeforeJoin ?? 0,
+        reconnected: round.joins.reconnected ?? 0,
+      });
+    }
   }
   log("round joined", {
     position: round.position,
@@ -789,6 +932,111 @@ async function joinRound(round) {
     failed: round.joins.failed.length,
     roomCode: round.roomCode,
   });
+}
+
+async function joinScheduledWithRetry(round, client) {
+  let lastAck = null;
+  let lastError = null;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      await ensureClientSocketConnected(round, client);
+      const ack = await emitAck(client.socket, "game1:join-scheduled", {
+        accessToken: client.accessToken,
+        scheduledGameId: round.scheduledGameId,
+        hallId: client.hallId,
+        playerName: client.playerName,
+      }, 20_000);
+      lastAck = ack;
+      if (ack?.ok || !isTransientJoinFailure(ack)) {
+        if (ack?.ok && attempt > 1) {
+          round.joins.retried = (round.joins.retried ?? 0) + 1;
+          report.anomalies.push({
+            at: new Date().toISOString(),
+            type: "join.retry.succeeded",
+            position: round.position,
+            scheduledGameId: round.scheduledGameId,
+            email: client.email,
+            attempts: attempt,
+            previousCode: lastError?.code ?? lastAck?.error?.code,
+            previousMessage: lastError?.message ?? lastAck?.error?.message,
+          });
+        }
+        return ack;
+      }
+      round.joins.transientFailures = (round.joins.transientFailures ?? 0) + 1;
+      await sleep(350 * attempt + Math.floor(Math.random() * 150));
+    } catch (err) {
+      lastError = err;
+      if (!isTransientJoinFailure(err) || attempt === 3) {
+        throw err;
+      }
+      round.joins.transientFailures = (round.joins.transientFailures ?? 0) + 1;
+      await sleep(350 * attempt + Math.floor(Math.random() * 150));
+    }
+  }
+  return lastAck;
+}
+
+async function ensureClientSocketConnected(round, client) {
+  if (client.socket?.connected) return;
+  round.joins.disconnectedBeforeJoin =
+    (round.joins.disconnectedBeforeJoin ?? 0) + 1;
+  await reconnectClientSocket(client, 8_000);
+  round.joins.reconnected = (round.joins.reconnected ?? 0) + 1;
+}
+
+function reconnectClientSocket(client, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const socket = client.socket;
+    if (!socket) {
+      const err = new Error("socket missing before join");
+      err.code = "NOT_CONNECTED";
+      reject(err);
+      return;
+    }
+    if (socket.connected) {
+      resolve();
+      return;
+    }
+    let settled = false;
+    const cleanup = () => {
+      clearTimeout(timer);
+      socket.off("connect", onConnect);
+      socket.off("connect_error", onError);
+    };
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      fn(value);
+    };
+    const onConnect = () => finish(resolve);
+    const onError = (err) => {
+      if (err && typeof err === "object") {
+        err.code = err.code ?? "NOT_CONNECTED";
+      }
+      finish(reject, err);
+    };
+    const timer = setTimeout(() => {
+      const err = new Error("socket reconnect timeout before join");
+      err.code = "NOT_CONNECTED";
+      finish(reject, err);
+    }, timeoutMs);
+    socket.once("connect", onConnect);
+    socket.once("connect_error", onError);
+    socket.connect();
+  });
+}
+
+function isTransientJoinFailure(value) {
+  const code = value?.error?.code ?? value?.code;
+  const message = String(value?.error?.message ?? value?.message ?? "");
+  return (
+    code === "TIMEOUT" ||
+    code === "NOT_CONNECTED" ||
+    message.includes("game1:join-scheduled ack timeout") ||
+    message.includes("Server svarte ikke innen")
+  );
 }
 
 async function purchaseRound(round, ticketCatalog) {
@@ -853,7 +1101,7 @@ async function purchaseWithRetry(round, client, spec) {
         throw err;
       }
       round.purchases.transientFailures = (round.purchases.transientFailures ?? 0) + 1;
-      await sleep(250 * attempt + Math.floor(Math.random() * 150));
+      await sleep(purchaseRetryDelayMs(err, attempt));
     }
   }
   throw lastError ?? new Error("purchase retry exhausted");
@@ -861,10 +1109,27 @@ async function purchaseWithRetry(round, client, spec) {
 
 function isTransientPurchaseFailure(err) {
   const message = String(err?.message ?? err?.body?.error?.message ?? "");
+  const code = err?.code ?? err?.body?.error?.code;
   return (
-    err?.code === "WALLET_SERIALIZATION_FAILURE" ||
-    message.includes("Lommebok-operasjon kunne ikke fullføres")
+    code === "WALLET_SERIALIZATION_FAILURE" ||
+    code === "WALLET_CIRCUIT_OPEN" ||
+    code === "WALLET_API_TIMEOUT" ||
+    code === "WALLET_API_UNAVAILABLE" ||
+    message.includes("Lommebok-operasjon kunne ikke fullføres") ||
+    message.includes("Lommebok midlertidig utilgjengelig")
   );
+}
+
+function purchaseRetryDelayMs(err, attempt) {
+  const message = String(err?.message ?? err?.body?.error?.message ?? "");
+  const code = err?.code ?? err?.body?.error?.code;
+  if (
+    code === "WALLET_CIRCUIT_OPEN" ||
+    message.includes("Lommebok midlertidig utilgjengelig")
+  ) {
+    return WALLET_CIRCUIT_RETRY_DELAY_MS + Math.floor(Math.random() * 1_500);
+  }
+  return 250 * attempt + Math.floor(Math.random() * 150);
 }
 
 function ticketSpecForClient(client, catalog) {

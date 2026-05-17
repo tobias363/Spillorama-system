@@ -1,0 +1,414 @@
+{
+  "schemaVersion": 1,
+  "generatedBy": "scripts/dev/observability-snapshot.mjs",
+  "label": "goh-80-joinbroadcastdebounce-preflight",
+  "generatedAt": "2026-05-17T12:07:10.532Z",
+  "windowMinutes": 60,
+  "window": {
+    "approxStart": "2026-05-17T11:07:10.532Z",
+    "end": "2026-05-17T12:07:10.532Z"
+  },
+  "repo": {
+    "root": "/Users/tobiashaugen/Projects/Spillorama-system",
+    "branch": "codex/goh-4x80-rerun-2026-05-17",
+    "head": "1bd55b1f765483445cf39015205736756855f9aa",
+    "dirty": true
+  },
+  "credentials": {
+    "sentry": {
+      "tokenPresent": true,
+      "org": "spillorama",
+      "projects": [
+        "spillorama-backend",
+        "spillorama-frontend"
+      ]
+    },
+    "posthog": {
+      "tokenPresent": true,
+      "host": "https://eu.posthog.com",
+      "projectId": "178713"
+    }
+  },
+  "sentry": {
+    "ok": true,
+    "org": "spillorama",
+    "baseUrl": "https://sentry.io",
+    "query": "is:unresolved",
+    "statsPeriod": "24h",
+    "projects": [
+      {
+        "slug": "spillorama-backend",
+        "issues": [
+          {
+            "id": "120338257",
+            "shortId": "SPILLORAMA-BACKEND-8",
+            "title": "N+1 Query",
+            "status": "unresolved",
+            "count": 15,
+            "firstSeen": "2026-05-16T16:04:27.893856Z",
+            "lastSeen": "2026-05-16T22:46:27.228066Z",
+            "level": "info",
+            "culprit": "POST /api/agent/game1/master/resume",
+            "permalink": "https://spillorama.sentry.io/issues/120338257/"
+          },
+          {
+            "id": "120378924",
+            "shortId": "SPILLORAMA-BACKEND-A",
+            "title": "N+1 Query",
+            "status": "unresolved",
+            "count": 3,
+            "firstSeen": "2026-05-16T22:26:35.753501Z",
+            "lastSeen": "2026-05-16T22:44:37.393439Z",
+            "level": "info",
+            "culprit": "POST /api/agent/game1/master/advance",
+            "permalink": "https://spillorama.sentry.io/issues/120378924/"
+          },
+          {
+            "id": "120366801",
+            "shortId": "SPILLORAMA-BACKEND-9",
+            "title": "Error: Vent 1.0s mellom trekninger.",
+            "status": "unresolved",
+            "count": 7,
+            "firstSeen": "2026-05-16T20:06:18.482000Z",
+            "lastSeen": "2026-05-16T20:06:30.986000Z",
+            "level": "error",
+            "culprit": "DrawOrchestrationService._drawNextLocked(game:DrawOrchestrationService.ts)",
+            "permalink": "https://spillorama.sentry.io/issues/120366801/"
+          },
+          {
+            "id": "119849134",
+            "shortId": "SPILLORAMA-BACKEND-4",
+            "title": "N+1 Query",
+            "status": "unresolved",
+            "count": 621,
+            "firstSeen": "2026-05-14T09:49:41.478567Z",
+            "lastSeen": "2026-05-16T18:54:55.726268Z",
+            "level": "info",
+            "culprit": "GET /api/games/spill1/lobby",
+            "permalink": "https://spillorama.sentry.io/issues/119849134/"
+          },
+          {
+            "id": "120328733",
+            "shortId": "SPILLORAMA-BACKEND-7",
+            "title": "N+1 Query",
+            "status": "unresolved",
+            "count": 5,
+            "firstSeen": "2026-05-16T15:00:23.504457Z",
+            "lastSeen": "2026-05-16T15:10:21.942919Z",
+            "level": "info",
+            "culprit": "POST /api/agent/game1/master/start",
+            "permalink": "https://spillorama.sentry.io/issues/120328733/"
+          },
+          {
+            "id": "119800148",
+            "shortId": "SPILLORAMA-BACKEND-3",
+            "title": "N+1 Query",
+            "status": "unresolved",
+            "count": 143,
+            "firstSeen": "2026-05-14T06:23:49.507802Z",
+            "lastSeen": "2026-05-16T09:11:14.534738Z",
+            "level": "info",
+            "culprit": "GET /api/agent/game1/lobby",
+            "permalink": "https://spillorama.sentry.io/issues/119800148/"
+          },
+          {
+            "id": "120157724",
+            "shortId": "SPILLORAMA-BACKEND-6",
+            "title": "Error: Reservasjon med samme key (arm-BINGO_DEMO-PILOT-GOH-7bd7b9ee-1a31-4730-8aae-a480ea7a4ccc-8a51800a-391d-4d50-b4b3-47ee0db68899-9) har beløp 60.000000, ikke 180.",
+            "status": "unresolved",
+            "count": 2,
+            "firstSeen": "2026-05-15T14:34:32.636000Z",
+            "lastSeen": "2026-05-15T14:34:53.103000Z",
+            "level": "error",
+            "culprit": "<anonymous>(adapters:PostgresWalletAdapter.ts)",
+            "permalink": "https://spillorama.sentry.io/issues/120157724/"
+          },
+          {
+            "id": "119874307",
+            "shortId": "SPILLORAMA-BACKEND-5",
+            "title": "error: terminating connection due to administrator command",
+            "status": "unresolved",
+            "count": 1,
+            "firstSeen": "2026-05-14T11:23:30.663000Z",
+            "lastSeen": "2026-05-14T11:23:30.663000Z",
+            "level": "error",
+            "culprit": "POST /api/agent/game1/master/heartbeat",
+            "permalink": "https://spillorama.sentry.io/issues/119874307/"
+          },
+          {
+            "id": "119756638",
+            "shortId": "SPILLORAMA-BACKEND-2",
+            "title": "Error: [OBS-TEST] Smoke-test error fra /api/_dev/observability-test (obs-test-1778744130521)",
+            "status": "unresolved",
+            "count": 2,
+            "firstSeen": "2026-05-13T23:18:31.346000Z",
+            "lastSeen": "2026-05-14T07:35:30.528000Z",
+            "level": "error",
+            "culprit": "POST /api/_dev/observability-test",
+            "permalink": "https://spillorama.sentry.io/issues/119756638/"
+          },
+          {
+            "id": "119755549",
+            "shortId": "SPILLORAMA-BACKEND-1",
+            "title": "SyntaxError: Unexpected token 'y', ...\"ata\":{\"x\":yyyyyyyyyy\"... is not valid JSON",
+            "status": "unresolved",
+            "count": 1,
+            "firstSeen": "2026-05-13T23:06:01.807000Z",
+            "lastSeen": "2026-05-13T23:06:01.807000Z",
+            "level": "error",
+            "culprit": "POST /api/_dev/debug/rrweb-events",
+            "permalink": "https://spillorama.sentry.io/issues/119755549/"
+          }
+        ]
+      },
+      {
+        "slug": "spillorama-frontend",
+        "issues": [
+          {
+            "id": "119874385",
+            "shortId": "SPILLORAMA-FRONTEND-2",
+            "title": "loading-overlay.soft-fallback aktivert (state=RECONNECTING)",
+            "status": "unresolved",
+            "count": 24,
+            "firstSeen": "2026-05-14T11:23:49.599000Z",
+            "lastSeen": "2026-05-16T19:28:42.443000Z",
+            "level": "info",
+            "culprit": "/web/",
+            "permalink": "https://spillorama.sentry.io/issues/119874385/"
+          },
+          {
+            "id": "119867654",
+            "shortId": "SPILLORAMA-FRONTEND-1",
+            "title": "loading-overlay.soft-fallback aktivert (state=RESYNCING)",
+            "status": "unresolved",
+            "count": 27,
+            "firstSeen": "2026-05-14T10:59:17.189000Z",
+            "lastSeen": "2026-05-16T19:00:43.988000Z",
+            "level": "info",
+            "culprit": "/web/",
+            "permalink": "https://spillorama.sentry.io/issues/119867654/"
+          }
+        ]
+      }
+    ],
+    "errors": []
+  },
+  "posthog": {
+    "ok": true,
+    "host": "https://eu.posthog.com",
+    "projectId": "178713",
+    "project": {
+      "id": 178713,
+      "name": "Default project",
+      "timezone": "UTC"
+    },
+    "eventCounts": [
+      {
+        "event": "ticket.purchase.success",
+        "count": 4160,
+        "lastSeen": "2026-05-17T11:59:04.703000Z"
+      },
+      {
+        "event": "spill1.payout.pattern",
+        "count": 86,
+        "lastSeen": "2026-05-17T12:00:15.464000Z"
+      },
+      {
+        "event": "spill1.master.start",
+        "count": 12,
+        "lastSeen": "2026-05-17T11:59:05.363000Z"
+      }
+    ],
+    "recentEvents": [
+      {
+        "event": "spill1.payout.pattern",
+        "timestamp": "2026-05-17T12:00:15.464000Z"
+      },
+      {
+        "event": "spill1.payout.pattern",
+        "timestamp": "2026-05-17T11:59:54.328000Z"
+      },
+      {
+        "event": "spill1.payout.pattern",
+        "timestamp": "2026-05-17T11:59:53.346000Z"
+      },
+      {
+        "event": "spill1.payout.pattern",
+        "timestamp": "2026-05-17T11:59:53.337000Z"
+      },
+      {
+        "event": "spill1.payout.pattern",
+        "timestamp": "2026-05-17T11:59:48.371000Z"
+      },
+      {
+        "event": "spill1.payout.pattern",
+        "timestamp": "2026-05-17T11:59:48.361000Z"
+      },
+      {
+        "event": "spill1.payout.pattern",
+        "timestamp": "2026-05-17T11:59:48.351000Z"
+      },
+      {
+        "event": "spill1.payout.pattern",
+        "timestamp": "2026-05-17T11:59:48.343000Z"
+      },
+      {
+        "event": "spill1.payout.pattern",
+        "timestamp": "2026-05-17T11:59:48.332000Z"
+      },
+      {
+        "event": "spill1.payout.pattern",
+        "timestamp": "2026-05-17T11:59:17.252000Z"
+      },
+      {
+        "event": "spill1.master.start",
+        "timestamp": "2026-05-17T11:59:05.363000Z"
+      },
+      {
+        "event": "ticket.purchase.success",
+        "timestamp": "2026-05-17T11:59:04.703000Z"
+      },
+      {
+        "event": "ticket.purchase.success",
+        "timestamp": "2026-05-17T11:59:04.673000Z"
+      },
+      {
+        "event": "ticket.purchase.success",
+        "timestamp": "2026-05-17T11:59:04.661000Z"
+      },
+      {
+        "event": "ticket.purchase.success",
+        "timestamp": "2026-05-17T11:59:04.642000Z"
+      },
+      {
+        "event": "ticket.purchase.success",
+        "timestamp": "2026-05-17T11:59:04.599000Z"
+      },
+      {
+        "event": "ticket.purchase.success",
+        "timestamp": "2026-05-17T11:59:04.573000Z"
+      },
+      {
+        "event": "ticket.purchase.success",
+        "timestamp": "2026-05-17T11:59:04.561000Z"
+      },
+      {
+        "event": "ticket.purchase.success",
+        "timestamp": "2026-05-17T11:59:04.555000Z"
+      },
+      {
+        "event": "ticket.purchase.success",
+        "timestamp": "2026-05-17T11:59:04.547000Z"
+      },
+      {
+        "event": "ticket.purchase.success",
+        "timestamp": "2026-05-17T11:59:04.540000Z"
+      },
+      {
+        "event": "ticket.purchase.success",
+        "timestamp": "2026-05-17T11:59:04.533000Z"
+      },
+      {
+        "event": "ticket.purchase.success",
+        "timestamp": "2026-05-17T11:59:04.527000Z"
+      },
+      {
+        "event": "ticket.purchase.success",
+        "timestamp": "2026-05-17T11:59:04.520000Z"
+      },
+      {
+        "event": "ticket.purchase.success",
+        "timestamp": "2026-05-17T11:59:04.514000Z"
+      },
+      {
+        "event": "ticket.purchase.success",
+        "timestamp": "2026-05-17T11:59:04.509000Z"
+      },
+      {
+        "event": "ticket.purchase.success",
+        "timestamp": "2026-05-17T11:59:04.502000Z"
+      },
+      {
+        "event": "ticket.purchase.success",
+        "timestamp": "2026-05-17T11:59:04.498000Z"
+      },
+      {
+        "event": "ticket.purchase.success",
+        "timestamp": "2026-05-17T11:59:04.493000Z"
+      },
+      {
+        "event": "ticket.purchase.success",
+        "timestamp": "2026-05-17T11:59:04.487000Z"
+      }
+    ],
+    "errors": []
+  },
+  "pilotMonitor": {
+    "ok": true,
+    "logPath": "/tmp/pilot-monitor.log",
+    "sinceIso": "2026-05-17T11:07:10.532Z",
+    "exists": true,
+    "severityCounts": {
+      "P0": 0,
+      "P1": 0,
+      "P2": 0,
+      "P3": 12
+    },
+    "p0p1": [],
+    "recent": [
+      "6bd67e6b-f0ba-46b7-94bf-b4e8af6fa500|running|c2f2bd18-96ab-4c6b-83d9-e6fd3c39c19a|completed — kjør cleanup-curl",
+      "6bd67e6b-f0ba-46b7-94bf-b4e8af6fa500|running|c2f2bd18-96ab-4c6b-83d9-e6fd3c39c19a|completed — kjør cleanup-curl",
+      "6bd67e6b-f0ba-46b7-94bf-b4e8af6fa500|running|c2f2bd18-96ab-4c6b-83d9-e6fd3c39c19a|completed — kjør cleanup-curl",
+      "6bd67e6b-f0ba-46b7-94bf-b4e8af6fa500|running|c2f2bd18-96ab-4c6b-83d9-e6fd3c39c19a|completed — kjør cleanup-curl",
+      "[2026-05-17T11:20:34Z] [P3] round.ended: Runde 74 ferdig (a5032275-bed5-48e9-85eb-8f9254053b31, 61s). Rapport: /tmp/pilot-monitor-round-74.md",
+      "[2026-05-17T11:22:22Z] [P3] round.ended: Runde 75 ferdig (85887338-b345-41b5-95b5-8cf94879700d, 68s). Rapport: /tmp/pilot-monitor-round-75.md",
+      "[2026-05-17T11:24:09Z] [P3] round.ended: Runde 76 ferdig (8e55274f-c500-450d-b828-ab2123c2300e, 70s). Rapport: /tmp/pilot-monitor-round-76.md",
+      "[2026-05-17T11:26:02Z] [P3] round.ended: Runde 77 ferdig (de76ac85-d04c-4252-8e8f-9dc9e027e86e, 70s). Rapport: /tmp/pilot-monitor-round-77.md",
+      "[2026-05-17T11:27:50Z] [P3] round.ended: Runde 78 ferdig (b5027c15-f745-4306-9f37-d0583d362588, 65s). Rapport: /tmp/pilot-monitor-round-78.md",
+      "[2026-05-17T11:29:37Z] [P3] round.ended: Runde 79 ferdig (9ab4c45f-b96c-42d1-a6f6-1afee56e2458, 65s). Rapport: /tmp/pilot-monitor-round-79.md",
+      "[2026-05-17T11:31:30Z] [P3] round.ended: Runde 80 ferdig (50443121-e0dd-454e-b02d-56409d0d444e, 72s). Rapport: /tmp/pilot-monitor-round-80.md",
+      "[2026-05-17T11:33:23Z] [P3] round.ended: Runde 81 ferdig (fc267abe-9408-479b-b40f-3d2dbb3368c4, 71s). Rapport: /tmp/pilot-monitor-round-81.md",
+      "[2026-05-17T11:35:05Z] [P3] round.ended: Runde 82 ferdig (b5107a04-c58d-4f8a-8457-bd85fb8552c6, 63s). Rapport: /tmp/pilot-monitor-round-82.md",
+      "[2026-05-17T11:36:58Z] [P3] round.ended: Runde 83 ferdig (b3769bef-7059-4207-bc0b-a877011d95b3, 70s). Rapport: /tmp/pilot-monitor-round-83.md",
+      "[2026-05-17T11:39:05Z] [P3] round.ended: Runde 84 ferdig (cee17c84-4627-4016-83e3-9b2900abeeb7, 81s). Rapport: /tmp/pilot-monitor-round-84.md",
+      "[2026-05-17T12:00:15Z] [P3] round.ended: Runde 85 ferdig (f695e287-6e78-4c9f-891f-40ae4b45d03d, 71s). Rapport: /tmp/pilot-monitor-round-85.md"
+    ]
+  },
+  "database": {
+    "ok": true,
+    "postgres": "postgresql://dpg-d6k3ren5r7bs73a4c0bg-a.frankfurt-postgres.render.com/bingo_db_64tj?sslmode=require (user=spillorama_pm_readonly)",
+    "source": "database_url",
+    "queries": [
+      {
+        "name": "pg_stat_activity",
+        "ok": true,
+        "rows": [
+          [
+            "active",
+            "1"
+          ],
+          [
+            "",
+            "13"
+          ]
+        ]
+      },
+      {
+        "name": "game1_scheduled_status_24h",
+        "ok": true,
+        "rows": []
+      },
+      {
+        "name": "game_plan_run_status_24h",
+        "ok": true,
+        "rows": []
+      }
+    ]
+  },
+  "comparison": null,
+  "output": {
+    "jsonPath": "/Users/tobiashaugen/Projects/Spillorama-system/docs/evidence/20260517-observability-goh-80-joinbroadcastdebounce-preflight-2026-05-17T12-07-10-532Z/2026-05-17T12-07-10-532Z-goh-80-joinbroadcastdebounce-preflight.json",
+    "mdPath": "/Users/tobiashaugen/Projects/Spillorama-system/docs/evidence/20260517-observability-goh-80-joinbroadcastdebounce-preflight-2026-05-17T12-07-10-532Z/2026-05-17T12-07-10-532Z-goh-80-joinbroadcastdebounce-preflight.md",
+    "readmePath": "/Users/tobiashaugen/Projects/Spillorama-system/docs/evidence/20260517-observability-goh-80-joinbroadcastdebounce-preflight-2026-05-17T12-07-10-532Z/README.md"
+  }
+}

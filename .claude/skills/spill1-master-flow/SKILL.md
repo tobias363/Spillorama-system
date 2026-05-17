@@ -2,7 +2,7 @@
 name: spill1-master-flow
 description: When the user/agent works with Spill 1 master-konsoll, plan-runtime, scheduled-game lifecycle, GoH-master-rom, or hall-ready-state. Also use when they mention master-actions, GamePlanRunService, GamePlanEngineBridge, Game1MasterControlService, Game1HallReadyService, Game1TransferHallService, Game1ScheduleTickService, Game1LobbyService, GameLobbyAggregator, MasterActionService, NextGamePanel, Spill1HallStatusBox, Spill1AgentControls, plan-run-id, scheduled-game-id, currentScheduledGameId, master-hall, ekskluderte haller, "Marker Klar", "Start neste spill", master-flyt, plan-runtime-koblingen, ADR-0021, ADR-0022, stuck-game-recovery, I14, I15, I16, BIN-1018, BIN-1024, BIN-1030, BIN-1041. Make sure to use this skill whenever someone touches the master/agent UI, plan or scheduled-game services, or anything related to who controls a Spill 1 round — even if they don't explicitly ask for it.
 metadata:
-  version: 1.23.0
+  version: 1.25.0
   project: spillorama
 ---
 
@@ -202,7 +202,7 @@ Sentry-funn fra 4x80:
 - Fix-mønster: `GameCatalogService.getByIds(ids)` + `GamePlanService.fetchCatalogEntries()` batch-loader catalog entries. Unit-stub fallback for `getById` beholdes kun for tester.
 
 Known anomalies fra baseline:
-- `ticket:mark` socket-flow feilet med `GAME_NOT_RUNNING` på alle runder, selv om server-side draw/pattern-eval fullførte. 4x80 bekreftet samme P1 med 164495 mark failures og 0 mark acks. Dette må fikses før man kaller live spiller-markering robust.
+- `ticket:mark` socket-flow feilet med `GAME_NOT_RUNNING` på alle runder, selv om server-side draw/pattern-eval fullførte. 4x80 bekreftet samme P1 med 164495 mark failures og 0 mark acks. Rev1-fix var ikke nok; rev2-kontrakten er explicit `draw:new.gameId` → `ticket:mark.scheduledGameId`.
 - Engine pauset naturlig og ble auto-resumet 4 ganger per runde. Fullflyten overlever dette, men PM må avklare om dette er ønsket phase-pause-kontrakt.
 - Synthetic load-brukere kan arve RG-loss-ledger mellom lokale runs. Runneren resetter nå `app_rg_loss_entries`, `app_rg_personal_loss_limits` og pending limit changes for `demo-load-*`-brukere i demo-hallene.
 - Runnerens final-sjekk må behandle `GAME_PLAN_RUN_INVALID_TRANSITION` med `status=finished` som forventet sluttstate; ekstra advance etter ferdig plan er ikke produktfeil.
@@ -1215,11 +1215,14 @@ GoH 4x80-testen 2026-05-16 viste at alle plan-runder kunne fullføre server-side
 
 Root cause: generic socket-handler `ticketEvents.ts` kalte `BingoEngine.markNumber()` for alle rom. Scheduled Spill 1 har ikke autoritativ running game i legacy `BingoEngine`; state eies av `Game1DrawEngineService` + DB (`app_game1_scheduled_games`, `app_game1_draws`, `app_game1_ticket_assignments`). Derfor så legacy-engine "ingen aktiv runde" selv mens scheduled-engine kjørte korrekt.
 
-Fix-kontrakt 2026-05-17:
+Fix-kontrakt 2026-05-17 rev2:
 
 - `ticket:mark` går først via `Game1ScheduledTicketMarkService.validate()`.
-- Validatoren bruker in-memory room-binding (`RoomSnapshot.scheduledGameId`) for å avgjøre om rommet er scheduled Spill 1.
+- `ticket:mark` payload kan ha optional `scheduledGameId`. Når `draw:new` har `gameId`, må klient/runner ekko dette som `scheduledGameId` på mark-eventen.
+- Validatoren bruker eksplisitt `scheduledGameId` som autoritativ DB-key. In-memory room-binding (`RoomSnapshot.scheduledGameId`) er bare fallback for legacy callers uten explicit id.
+- Rev1-fix som kun brukte `RoomSnapshot.scheduledGameId` var utilstrekkelig: GoH 4x80-rerun 2026-05-17 viste at canonical room reset kan nullstille bindingen før high-frequency mark-acks er ferdig prosessert.
 - Scheduled path validerer: aktiv status (`running`/`paused`), tallet er trukket, spilleren finnes i rommet, og spillerens DB-persisted assignments inneholder tallet.
+- For explicit `scheduledGameId` er late ack etter `completed` gyldig når tallet var trukket og finnes på spillerens bong. Socket-mark er player-ack/UI-kontrakt; scheduled draw-engine eier DB-mutasjonene.
 - Validatoren cacher draw-state og per-player ticket numbers. Den må IKKE bruke full `enrichScheduledGame1RoomSnapshot()` per mark; 4x80 kan produsere hundretusener av marks.
 - Hvis rommet ikke er scheduled Spill 1 returnerer validatoren `false`, og handleren faller tilbake til legacy `BingoEngine.markNumber()` for ad-hoc/legacy-rom.
 
@@ -1231,8 +1234,39 @@ Tester som beskytter:
 ALDRI gjør:
 
 - ❌ Ikke kall `BingoEngine.markNumber()` direkte for scheduled Spill 1.
+- ❌ Ikke stol på `RoomSnapshot.scheduledGameId` alene under GoH-load; den kan bli nullstilt ved canonical room reset. Bruk `draw:new.gameId` → `ticket:mark.scheduledGameId`.
 - ❌ Ikke hydrer full scheduled room snapshot per `ticket:mark`; det er en N+1/load-regresjon.
 - ❌ Ikke bruk server-side round completion alene som bevis for live player socket-helse; mark-acks må være >0 i GoH-runner.
+
+## Scheduled join — transient ack-timeout skal retry-es
+
+Postfix-rerun 2026-05-17 etter rev2 mark-fix verifiserte at `ticket:mark` var frisk i tre 4x80-runder: 39106 `markAcks`, 0 `markFailures`, 0 `GAME_NOT_RUNNING`. Full plan stoppet likevel i runde 4 fordi 5 spillere i hall 4 fikk `game1:join-scheduled ack timeout`.
+
+Final 4x80 rerun 2026-05-17 etter join-retry + mark-retry passerte hele planen:
+
+- 13/13 planposisjoner `completed`
+- 4 haller x 80 spillere = 320 samtidige syntetiske spillere
+- 4160 purchases, 11960 ticket assignments
+- 159418 `ticket:mark` acks, 0 `ticket:mark` failures
+- 0 join failures etter retry
+- 0 purchase failures etter retry
+- 0 pilot-monitor P0/P1 og 0 nye/increased Sentry issues
+- Evidence: `docs/evidence/20260517-goh-full-plan-rerun-4x80-markretry/`
+
+Runneren har også en egen mark-retry-kontrakt: transient `ticket:mark` `TIMEOUT`/`NOT_CONNECTED` retry-es med samme UUID `clientRequestId` og 15s ack-timeout. Dette er test-harness-resiliens for Socket.IO-ack timing; reelle `ack.ok=false` non-transient feil skal fortsatt logges som `ticket.mark.failures`.
+
+Kontrakt:
+
+- `game1:join-scheduled` må behandles som idempotent og retryable for `TIMEOUT`/`NOT_CONNECTED`/ack-timeout.
+- Runneren bruker `joinScheduledWithRetry()` med 3 forsøk før `round.joins.failed` fylles.
+- Spillerklienten bruker `Game1Controller.joinScheduledGameWithRetry()` både ved initial scheduled join og delta-join etter plan-advance.
+- Evidence skal skille transient join failures/retries fra endelige join failures. En transient ack-timeout er ikke automatisk scheduled-game state-feil.
+
+ALDRI gjør:
+
+- ❌ Ikke la én socket ack-timeout sende spiller rett til permanent fallback uten retry.
+- ❌ Ikke stopp full-plan-testen på transient join-timeout før retry-pathen har kjørt.
+- ❌ Ikke bland join-timeout med `ticket:mark`-feilen; mark-fixen er egen kontrakt og var grønn i postfix-rerun.
 
 ### Filer
 
@@ -1298,4 +1332,7 @@ Ved tvil mellom kode og doc: **doc-en vinner**, koden må fikses. Spør Tobias f
 | 2026-05-15 | v1.20.3 — Pilot-flow CI follow-up 2: Rad-vinst-spec driver scheduled draws eksplisitt via test-only `e2e-draw-next`/`scheduledDrawNext()` fordi workflowen kjører med `JOBS_ENABLED=false`. Ikke slå på scheduler-jobs i CI for å reparere denne testen; hold tests deterministiske og dokumenter scheduled draw-driveren. PITFALLS §6.20. |
 | 2026-05-16 | v1.21.0 — GoH full-plan baseline: `scripts/dev/goh-full-plan-run.mjs` kjørte `demo-pilot-goh` med 4 haller x 20 spillere gjennom alle 13 planposisjoner. Clean run PASSED, final plan-run `status=finished`, evidence lagret i `docs/evidence/20260516-goh-full-plan-run/`. Natural-end reconcile presisert: mid-plan `completed` er normal mellom-runde-state, ikke stuck. Dokumenterer også kjente anomalies: scheduled `ticket:mark` `GAME_NOT_RUNNING`, 4 auto-resumes per runde, stale RG-ledger-reset og runner final `status=finished`-kontrakt. PITFALLS §2.11, §3.18, §6.21-§6.23. |
 | 2026-05-16 | v1.22.0 — GoH full-plan 4x80 escalation: 320 samtidige syntetiske spillere gjennom alle 13 planposisjoner. Runner PASS, 4160 purchases, 11960 ticket assignments, 0 pilot-monitor P0/P1. Dokumenterer ny Sentry N+1 på master advance/resume og fix-mønsteret `GameCatalogService.getByIds` + batch `GamePlanService.fetchItems`. Bekrefter fortsatt P1: scheduled `ticket:mark` `GAME_NOT_RUNNING` (164495 failures, 0 acks). Evidence `docs/evidence/20260516-goh-full-plan-run-4x80/`. PITFALLS §4.8 + §6.24. |
-| 2026-05-17 | v1.23.0 — Scheduled `ticket:mark` fix: generic socket-handler prøver nå `Game1ScheduledTicketMarkService.validate()` før legacy `BingoEngine.markNumber()`. Service validerer mot scheduled-game DB-state med cache og unngår full snapshot-hydrering per mark. Beskytter GoH 4x80 P1 (`GAME_NOT_RUNNING`, 164495 failures, 0 acks). Tester: `Game1ScheduledTicketMarkService.test.ts` + `ticketEvents.scheduled.test.ts`. PITFALLS §6.23 oppdatert. |
+| 2026-05-17 | v1.23.0 — Scheduled `ticket:mark` rev1: generic socket-handler prøver `Game1ScheduledTicketMarkService.validate()` før legacy `BingoEngine.markNumber()`. Service validerer mot scheduled-game DB-state med cache. 4x80-rerun viste at rev1 fortsatt var utilstrekkelig fordi den baserte seg på mutable `RoomSnapshot.scheduledGameId`. |
+| 2026-05-17 | v1.24.0 — Scheduled `ticket:mark` rev2: `TicketMarkPayloadSchema`, backend `MarkPayload`, `SpilloramaSocket.markTicket` og GoH-runner støtter optional `scheduledGameId`. Runner sender `draw:new.gameId`; validatoren bruker explicit DB-key, rom-match og late `completed` ack. Regresjonstester dekker cleared room binding + completed late ack. PITFALLS §6.23 rev2. |
+| 2026-05-17 | v1.25.0 — Scheduled join retry: 4x80 postfix-rerun verifiserte mark-fixen i tre runder, men runde 4 stoppet på 5 `game1:join-scheduled ack timeout`. Runner og `Game1Controller` retry-er nå transient scheduled join failures. PITFALLS §4.9. |
+| 2026-05-17 | v1.26.0 — GoH 4x80 final pass: runner fikk `ticket:mark` retry med stabil UUID og 15s timeout. Full plan passerte 13/13 med 4160 purchases, 11960 ticket assignments, 159418 mark acks, 0 mark failures, 0 join failures etter retry og 0 pilot-monitor P0/P1. Evidence `docs/evidence/20260517-goh-full-plan-rerun-4x80-markretry/`. |

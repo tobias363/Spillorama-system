@@ -5,19 +5,26 @@ import type { BingoEngine } from "./BingoEngine.js";
 import type { RoomSnapshot } from "./types.js";
 
 class FakePool {
+  roomCode: string | null = "BINGO_DEMO_PILOT_GOH";
   status = "running";
   draws: number[] = [39];
   drawBag: number[] = [39, 40];
   drawsCompleted = 1;
   assignmentGrids: number[][] = [[39, 1, 2, 3, 4]];
   queries: string[] = [];
+  params: unknown[][] = [];
 
-  async query<T>(sql: string): Promise<{ rows: T[] }> {
+  async query<T>(sql: string, params: unknown[] = []): Promise<{ rows: T[] }> {
     this.queries.push(sql);
+    this.params.push(params);
     if (sql.includes("app_game1_scheduled_games")) {
+      if (params[0] === "missing-game") {
+        return { rows: [] };
+      }
       return {
         rows: [
           {
+            room_code: this.roomCode,
             status: this.status,
             draw_bag_json: this.drawBag,
             draws_completed: this.drawsCompleted,
@@ -91,6 +98,69 @@ test("validate accepts drawn scheduled Spill 1 number on player's ticket", async
   });
 
   assert.equal(handled, true);
+});
+
+test("validate uses explicit scheduledGameId when room binding was cleared after round reset", async () => {
+  const pool = new FakePool();
+  const service = makeService(pool, roomSnapshot({ scheduledGameId: null }));
+
+  const handled = await service.validate({
+    roomCode: "BINGO_DEMO_PILOT_GOH",
+    playerId: "p1",
+    number: 39,
+    scheduledGameId: "scheduled-game-1",
+  });
+
+  assert.equal(handled, true);
+  assert.deepEqual(pool.params[0], ["scheduled-game-1"]);
+});
+
+test("validate accepts late explicit scheduledGameId ack after the scheduled round completed", async () => {
+  const pool = new FakePool();
+  pool.status = "completed";
+  const service = makeService(pool, roomSnapshot({ scheduledGameId: null }));
+
+  const handled = await service.validate({
+    roomCode: "BINGO_DEMO_PILOT_GOH",
+    playerId: "p1",
+    number: 39,
+    scheduledGameId: "scheduled-game-1",
+  });
+
+  assert.equal(handled, true);
+});
+
+test("validate still rejects completed rounds when caller has no explicit scheduledGameId", async () => {
+  const pool = new FakePool();
+  pool.status = "completed";
+  const service = makeService(pool);
+
+  await assert.rejects(
+    () => service.validate({ roomCode: "BINGO_DEMO_PILOT_GOH", playerId: "p1", number: 39 }),
+    (err: unknown) => {
+      assert.equal((err as { code?: string }).code, "GAME_NOT_RUNNING");
+      return true;
+    },
+  );
+});
+
+test("validate rejects explicit scheduledGameId that belongs to another room", async () => {
+  const pool = new FakePool();
+  pool.roomCode = "BINGO_OTHER_GOH";
+  const service = makeService(pool, roomSnapshot({ scheduledGameId: null }));
+
+  await assert.rejects(
+    () => service.validate({
+      roomCode: "BINGO_DEMO_PILOT_GOH",
+      playerId: "p1",
+      number: 39,
+      scheduledGameId: "scheduled-game-1",
+    }),
+    (err: unknown) => {
+      assert.equal((err as { code?: string }).code, "SCHEDULED_GAME_ROOM_MISMATCH");
+      return true;
+    },
+  );
 });
 
 test("validate caches scheduled game draw state and per-player ticket numbers", async () => {

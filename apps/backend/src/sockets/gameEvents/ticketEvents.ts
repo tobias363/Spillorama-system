@@ -70,6 +70,9 @@ export function registerTicketEvents(ctx: SocketContext): void {
         roomCode,
         playerId,
         number,
+        scheduledGameId: typeof payload?.scheduledGameId === "string"
+          ? payload.scheduledGameId
+          : undefined,
       }) ?? false;
       if (!handledByScheduledGame1) {
         await engine.markNumber({ roomCode, playerId, number });

@@ -22,7 +22,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { DomainError } from "../errors/DomainError.js";
 import { Game1TicketPurchaseService } from "./Game1TicketPurchaseService.js";
-import type { WalletAdapter } from "../adapters/WalletAdapter.js";
+import { WalletError, type WalletAdapter } from "../adapters/WalletAdapter.js";
 import { InMemoryWalletAdapter } from "../adapters/InMemoryWalletAdapter.js";
 import {
   AuditLogService,
@@ -517,6 +517,42 @@ test("purchase() avviser insufficient wallet → INSUFFICIENT_FUNDS", async () =
     }),
     (err) =>
       err instanceof DomainError && err.code === "INSUFFICIENT_FUNDS"
+  );
+});
+
+test("purchase() bevarer transient wallet-code når circuit breaker er åpen", async () => {
+  const { service, wallet } = makeService({
+    poolResponses: [
+      { match: (s) => s.includes("idempotency_key"), rows: [] },
+      {
+        match: (s) => s.includes("app_game1_scheduled_games"),
+        rows: [scheduledGameRow()],
+      },
+    ],
+  });
+  await seedWallet(wallet, "p1", 1000);
+  wallet.debit = async () => {
+    throw new WalletError(
+      "WALLET_CIRCUIT_OPEN",
+      "Lommebok midlertidig utilgjengelig. Prøv igjen om 30 sekunder."
+    );
+  };
+
+  await assert.rejects(
+    service.purchase({
+      scheduledGameId: "g1",
+      buyerUserId: "p1",
+      hallId: "hall-a",
+      ticketSpec: [
+        { color: "yellow", size: "small", count: 2, priceCentsEach: 2000 },
+      ],
+      paymentMethod: "digital_wallet",
+      idempotencyKey: "idem-circuit-open",
+    }),
+    (err) =>
+      err instanceof DomainError &&
+      err.code === "WALLET_CIRCUIT_OPEN" &&
+      err.message.includes("Lommebok midlertidig utilgjengelig")
   );
 });
 

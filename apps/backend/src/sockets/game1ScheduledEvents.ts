@@ -96,6 +96,24 @@ export function createGame1ScheduledEventHandlers(
     emitRoomUpdate,
     bindDefaultVariantConfig,
   } = deps;
+  const joinRoomUpdateTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  function scheduleJoinRoomUpdate(roomCode: string): void {
+    const existingTimer = joinRoomUpdateTimers.get(roomCode);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+    }
+    const timer = setTimeout(() => {
+      joinRoomUpdateTimers.delete(roomCode);
+      void emitRoomUpdate(roomCode).catch((err) => {
+        log.warn(
+          { err, event: "game1:join-scheduled", roomCode },
+          "join-scheduled room:update broadcast failed after ack"
+        );
+      });
+    }, 250);
+    joinRoomUpdateTimers.set(roomCode, timer);
+  }
 
   function ackSuccess<T>(
     callback: (response: AckResponse<T>) => void,
@@ -579,8 +597,8 @@ export function createGame1ScheduledEventHandlers(
           );
 
           socket.join(result.roomCode);
-          const snapshot = await emitRoomUpdate(result.roomCode);
-          ackSuccess(callback, { ...result, snapshot });
+          ackSuccess(callback, result);
+          scheduleJoinRoomUpdate(result.roomCode);
         } catch (error) {
           log.warn(
             { err: error, event: "game1:join-scheduled" },

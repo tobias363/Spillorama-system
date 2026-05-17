@@ -1,0 +1,54 @@
+{
+  "schemaVersion": "recovered-summary-v1",
+  "status": "passed",
+  "generatedFrom": "goh-full-plan-rerun-4x80-markretry-20260517T142023.md",
+  "note": "The full raw runner JSON for this pass was overwritten by the markdown report because the runner was invoked with `--output <path>` while the script only accepted `--output=<path>` at the time. The script now supports both forms and derives `.md` safely when output lacks `.json`. This summary preserves the audit-critical pass metrics from the saved markdown report.",
+  "runId": "2026-05-17T14-20-23-660Z",
+  "startedAt": "2026-05-17T14:20:23.661Z",
+  "finishedAt": "2026-05-17T14:53:43.507Z",
+  "backendUrl": "http://localhost:4000",
+  "groupOfHallsId": "demo-pilot-goh",
+  "halls": 4,
+  "playersPerHall": 80,
+  "playersTotal": 320,
+  "purchaseConcurrency": 8,
+  "purchaseRetries": 4,
+  "roundCount": 13,
+  "totals": {
+    "purchases": 4160,
+    "ticketAssignments": 11960,
+    "amountKr": 167400,
+    "draws": 754,
+    "resumes": 52,
+    "markAcks": 159418,
+    "markFailures": 0
+  },
+  "anomalies": {
+    "purchase.retry.succeeded": 108,
+    "jackpot.setup.applied": 1,
+    "ticket.mark.failures": 0,
+    "join.failures": 0
+  },
+  "rounds": [
+    { "position": 1, "slug": "bingo", "status": "completed", "purchases": 320, "tickets": 920, "amountKr": 12800, "draws": 54, "resumes": 4, "markAcks": 11461 },
+    { "position": 2, "slug": "1000-spill", "status": "completed", "purchases": 320, "tickets": 920, "amountKr": 12800, "draws": 59, "resumes": 4, "markAcks": 12536 },
+    { "position": 3, "slug": "5x500", "status": "completed", "purchases": 320, "tickets": 920, "amountKr": 12800, "draws": 54, "resumes": 4, "markAcks": 11459 },
+    { "position": 4, "slug": "ball-x-10", "status": "completed", "purchases": 320, "tickets": 920, "amountKr": 12800, "draws": 55, "resumes": 4, "markAcks": 11590 },
+    { "position": 5, "slug": "bokstav", "status": "completed", "purchases": 320, "tickets": 920, "amountKr": 12800, "draws": 58, "resumes": 4, "markAcks": 12419 },
+    { "position": 6, "slug": "innsatsen", "status": "completed", "purchases": 320, "tickets": 920, "amountKr": 12800, "draws": 59, "resumes": 4, "markAcks": 12361 },
+    { "position": 7, "slug": "jackpot", "status": "completed", "purchases": 320, "tickets": 920, "amountKr": 12800, "draws": 62, "resumes": 4, "markAcks": 13119 },
+    { "position": 8, "slug": "kvikkis", "status": "completed", "purchases": 320, "tickets": 920, "amountKr": 12800, "draws": 55, "resumes": 4, "markAcks": 11317 },
+    { "position": 9, "slug": "oddsen-55", "status": "completed", "purchases": 320, "tickets": 920, "amountKr": 12800, "draws": 62, "resumes": 4, "markAcks": 13132 },
+    { "position": 10, "slug": "oddsen-56", "status": "completed", "purchases": 320, "tickets": 920, "amountKr": 12800, "draws": 58, "resumes": 4, "markAcks": 12255 },
+    { "position": 11, "slug": "oddsen-57", "status": "completed", "purchases": 320, "tickets": 920, "amountKr": 12800, "draws": 60, "resumes": 4, "markAcks": 12786 },
+    { "position": 12, "slug": "trafikklys", "status": "completed", "purchases": 320, "tickets": 920, "amountKr": 13800, "draws": 59, "resumes": 4, "markAcks": 12507 },
+    { "position": 13, "slug": "tv-extra", "status": "completed", "purchases": 320, "tickets": 920, "amountKr": 12800, "draws": 59, "resumes": 4, "markAcks": 12476 }
+  ],
+  "observability": {
+    "preflight": "docs/evidence/20260517-observability-goh-80-markretry-preflight-2026-05-17T14-20-03-112Z/2026-05-17T14-20-03-112Z-goh-80-markretry-preflight.json",
+    "postpass": "docs/evidence/20260517-observability-goh-80-markretry-postpass-2026-05-17T14-54-48-927Z/2026-05-17T14-54-48-927Z-goh-80-markretry-postpass.json",
+    "pilotMonitorP0P1": 0,
+    "newSentryIssues": 0,
+    "increasedSentryIssues": 0
+  }
+}

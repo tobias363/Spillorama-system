@@ -66,6 +66,10 @@ async function callHandler(
   });
 }
 
+async function waitForJoinRoomUpdateDebounce(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 320));
+}
+
 // ── Minimal stubs for deps ──────────────────────────────────────────────────
 
 function makeStubs(overrides: Partial<StubOptions> = {}) {
@@ -167,10 +171,10 @@ function makeStubs(overrides: Partial<StubOptions> = {}) {
   };
 
   const emitCalls: string[] = [];
-  const emitRoomUpdate = async (code: string) => {
+  const emitRoomUpdate = opts.emitRoomUpdate ?? (async (code: string) => {
     emitCalls.push(code);
     return {} as never;
-  };
+  });
 
   const bindCalls: Array<{ code: string; slug: string }> = [];
   const bindDefaultVariantConfig = (code: string, slug: string) => {
@@ -213,6 +217,7 @@ interface StubOptions {
   engineJoinRoomError: Error & { code?: string } | null;
   user: Record<string, unknown>;
   rateLimitAllow: boolean;
+  emitRoomUpdate?: (code: string) => Promise<never>;
 }
 
 const VALID_PAYLOAD = {
@@ -236,6 +241,7 @@ test("4d.2: happy path — room_code NULL → createRoom + assignRoomCode", asyn
   assert.equal(data.roomCode, "ROOM-X1");
   assert.equal(data.playerId, "player-created");
   assert.deepEqual(stubs.bindCalls, [{ code: "ROOM-X1", slug: "bingo" }]);
+  await waitForJoinRoomUpdateDebounce();
   assert.deepEqual(stubs.emitCalls, ["ROOM-X1"]);
   assert.ok(sock.rooms.has("ROOM-X1"), "socket skal joine rommet");
   // CRIT-4: rommet skal markeres som scheduled så BingoEngine.startGame /
@@ -243,6 +249,44 @@ test("4d.2: happy path — room_code NULL → createRoom + assignRoomCode", asyn
   assert.deepEqual(stubs.markScheduledCalls, [
     { code: "ROOM-X1", scheduledGameId: "sg-1" },
   ]);
+});
+
+test("4d.2: join ack returneres før tung room:update-broadcast er ferdig", async () => {
+  let releaseBroadcast!: () => void;
+  let broadcastStarted = false;
+  let broadcastResolved = false;
+  const stubs = makeStubs({
+    emitRoomUpdate: async (code: string) => {
+      assert.equal(code, "ROOM-X1");
+      broadcastStarted = true;
+      await new Promise<void>((resolve) => {
+        releaseBroadcast = resolve;
+      });
+      broadcastResolved = true;
+      return {} as never;
+    },
+  });
+  const sock = mockSocket();
+  stubs.factory(sock as never);
+
+  const resp = await callHandler(sock, "game1:join-scheduled", VALID_PAYLOAD);
+
+  assert.equal(resp.ok, true, `expected ok, got: ${JSON.stringify(resp)}`);
+  assert.equal(
+    broadcastStarted,
+    false,
+    "join ack skal returneres før debounced room:update starter"
+  );
+  await waitForJoinRoomUpdateDebounce();
+  assert.equal(broadcastStarted, true, "room:update skal fortsatt startes");
+  assert.equal(
+    broadcastResolved,
+    false,
+    "join ack skal ikke vente på full room:update-broadcast"
+  );
+
+  releaseBroadcast();
+  await new Promise((resolve) => setImmediate(resolve));
 });
 
 test("4d.2: happy path — eksisterende room_code → joinRoom (reconnect)", async () => {

@@ -47,7 +47,7 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§1 Compliance & Regulatorisk](#1-compliance--regulatorisk) | 9 | 2026-05-10 |
 | [§2 Wallet & Pengeflyt](#2-wallet--pengeflyt) | 11 | 2026-05-14 |
 | [§3 Spill 1, 2, 3 arkitektur](#3-spill-1-2-3-arkitektur) | 19 | 2026-05-15 |
-| [§4 Live-rom-state](#4-live-rom-state) | 10 | 2026-05-16 |
+| [§4 Live-rom-state](#4-live-rom-state) | 11 | 2026-05-17 |
 | [§5 Git & PR-flyt](#5-git--pr-flyt) | 16 | 2026-05-15 |
 | [§6 Test-infrastruktur](#6-test-infrastruktur) | 25 | 2026-05-17 |
 | [§7 Frontend / Game-client](#7-frontend--game-client) | 47 | 2026-05-16 |
@@ -57,7 +57,7 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 | [§11 Agent-orkestrering](#11-agent-orkestrering) | 26 | 2026-05-17 |
 | [§12 DB-resilience](#12-db-resilience) | 1 | 2026-05-14 |
 
-**Total:** 186 entries (per 2026-05-17)
+**Total:** 187 entries (per 2026-05-17)
 
 ---
 
@@ -405,6 +405,24 @@ Loggen er **kumulativ** — eldste entries beholdes selv om koden er fikset, for
 - `docs/operations/GOH_FULL_PLAN_TEST_RESULT_2026-05-16.md`
 - `docs/evidence/20260516-goh-full-plan-run/`
 - §2.6 (aldri direct INSERT i wallet-tabeller), §2.9 (wallet integrity watcher)
+
+### §2.12 — Wallet circuit-open må ikke maskeres som `INSUFFICIENT_FUNDS`
+
+**Severity:** P1 (load-test kan feildiagnostisere transient wallet-backpressure som spillerens saldo/compliance-feil)
+**Oppdaget:** 2026-05-17 (GoH 4x80 rerun stoppet på `WALLET_CIRCUIT_OPEN` som ble rapportert som `INSUFFICIENT_FUNDS`)
+**Symptom:** Under GoH 4x80 var kjøpsflyten ellers frisk, men enkelte kjøp feilet som `INSUFFICIENT_FUNDS` selv om syntetiske load-spillere hadde saldo. Dette stoppet runneren som final purchase failure.
+**Root cause:** `Game1TicketPurchaseService.purchase()` fanget wallet-feil for digital wallet og mappet unknown/transient `WalletError` til generic `INSUFFICIENT_FUNDS`. Dermed mistet runneren forskjellen på reell saldo-feil og transient wallet circuit-breaker/backpressure.
+**Fix:** `WalletError` bevares/mappes til eksplisitte transient purchase-koder: `WALLET_CIRCUIT_OPEN`, `WALLET_SERIALIZATION_FAILURE`, `WALLET_API_TIMEOUT`, `WALLET_API_UNAVAILABLE`, `WALLET_DB_ERROR`. Runneren behandler disse som retryable, og `WALLET_CIRCUIT_OPEN` får lang backoff før nytt forsøk.
+**Prevention:**
+- Ikke map transient wallet-infrastrukturfeil til `INSUFFICIENT_FUNDS`; saldo-feil skal bare brukes når wallet-laget faktisk sier at midler mangler.
+- Load-test-runnere skal retry-e circuit-open med backoff lengre enn circuit reset-vinduet, ikke spamme kjøp umiddelbart.
+- Purchase evidence skal skille `purchase.transientFailures`, `purchase.retry.succeeded` og final `purchase.failed`.
+**Related:**
+- `apps/backend/src/game/Game1TicketPurchaseService.ts`
+- `apps/backend/src/game/Game1TicketPurchaseService.test.ts`
+- `scripts/dev/goh-full-plan-run.mjs`
+- `docs/evidence/20260517-goh-full-plan-rerun-4x80-walletfix-reconnect/`
+- `docs/evidence/20260517-goh-full-plan-rerun-4x80-markretry/`
 
 ---
 
@@ -1112,6 +1130,26 @@ WHERE id = $1
 - `docs/evidence/20260516-observability-goh-80-postrun-2026-05-16T22-48-56-853Z/`
 - `docs/operations/GOH_FULL_PLAN_4X80_TEST_RESULT_2026-05-16.md`
 
+### §4.9 — Scheduled `join-scheduled` ack-timeout må retry-es idempotent under GoH-load
+
+**Severity:** P1 (live-rom robusthet — spiller kan bli stående uten snapshot ved plan-advance)
+**Oppdaget:** 2026-05-17 (GoH 4x80 postfix-rerun etter scheduled `ticket:mark` rev2)
+**Status:** LØST 2026-05-17; final 4x80 mark-retry rerun passerte 13/13 planposisjoner med 0 join failures etter retry
+**Symptom:** Etter tre completed GoH-runder med 320/320 joins og 0 `ticket:mark` failures stoppet runde 4 (`ball-x-10`) på 5 `game1:join-scheduled ack timeout`, alle i `demo-hall-004`. Purchases var likevel 320/320, og Sentry/PostHog/pilot-monitor viste ingen ny P0/P1.
+**Root cause:** `game1:join-scheduled` er en high-fanout socket-ack under plan-advance. Ved 4 haller x 80 spillere kan enkelte acks time ut selv om operasjonen er idempotent og retry-safe. Runneren og `Game1Controller` behandlet transient ack-timeout som final failure uten eksplisitt retry. Dette blandet transport-timing med produkt-state og stoppet full-plan-testen før runden startet.
+**Fix:** Runneren fikk `joinScheduledWithRetry()` med 3 forsøk på `TIMEOUT`/`NOT_CONNECTED`/ack-timeout-melding og registrerer `join.retry.succeeded` anomalies. Spillerklienten fikk `Game1Controller.joinScheduledGameWithRetry()` for initial join og plan-advance delta-join, slik at transient join-timeout retry-es før lobby-fallback eller stale room beholdes.
+**Prevention:**
+- Alle scheduled join/resume-flows må være idempotente og retryable. Ikke bygg ny live-room flyt som antar at første socket ack alltid kommer innen timeout.
+- Full-plan-runner skal skille `join.transientFailures`/`join.retried` fra endelige join failures i evidence.
+- Ikke diagnostiser én `join-scheduled ack timeout` som scheduled-game state-feil før retry-pathen er kjørt og DB/snapshot er sjekket.
+- Ved ny GoH-load-test: krev 13/13 completed med `joins.failed.length = 0` etter retry, ikke bare manuelt refresh.
+**Related:**
+- `scripts/dev/goh-full-plan-run.mjs::joinScheduledWithRetry`
+- `packages/game-client/src/games/game1/Game1Controller.ts::joinScheduledGameWithRetry`
+- `docs/evidence/20260517-goh-full-plan-rerun-4x80-postfix/goh-full-plan-rerun-4x80-postfix-20260517T1033.json`
+- `docs/evidence/20260517-goh-full-plan-rerun-4x80-markretry/goh-full-plan-rerun-4x80-markretry-20260517T142023.summary.json`
+- `docs/operations/GOH_FULL_PLAN_4X80_RERUN_RESULT_2026-05-17.md`
+
 ---
 
 ## §5 Git & PR-flyt
@@ -1770,14 +1808,15 @@ curl -s "http://localhost:4000/api/_dev/debug/round-replay/<scheduled-game-id>?t
 **Severity:** P1 (falsk `LOSS_LIMIT_EXCEEDED` i load-test)
 **Oppdaget:** 2026-05-16 (første GoH full-plan-run stoppet på Oddsen 56)
 **Symptom:** Noen få syntetiske `demo-load-*`-spillere feiler kjøp med `LOSS_LIMIT_EXCEEDED` selv om saldo er høy og resten av hallene kjøper normalt. Feilen kom på runde 10 (`oddsen-56`) etter mange tidligere lokale testkjøp.
-**Root cause:** `app_rg_loss_entries` og personlige RG-limit-rader fra tidligere lokale testøkter lå igjen for samme syntetiske load-brukere. Dagens tap nærmet seg default limit, og neste kjøp ble korrekt blokkert av responsible-gaming-regler. Dette var testdata-støy, ikke purchase-flow-regresjon.
-**Fix:** `scripts/dev/goh-full-plan-run.mjs` resetter `app_rg_loss_entries`, `app_rg_personal_loss_limits` og `app_rg_pending_loss_limit_changes` for syntetiske `demo-load-h%@example.com`-brukere i de fire demo-hallene før full-plan-run.
+**Root cause:** `app_rg_loss_entries` og personlige RG-limit-rader fra tidligere lokale testøkter lå igjen for samme syntetiske load-brukere. Dagens tap nærmet seg default limit, og neste kjøp ble korrekt blokkert av responsible-gaming-regler. I tillegg holdt backendens `ComplianceManager` in-memory persistent state fra før DB-reset, slik at slettede RG-rader fortsatt kunne slå ut som falsk `LOSS_LIMIT_EXCEEDED` i samme dev-prosess.
+**Fix:** `scripts/dev/goh-full-plan-run.mjs` resetter `app_rg_loss_entries`, `app_rg_personal_loss_limits` og `app_rg_pending_loss_limit_changes` for syntetiske `demo-load-h%@example.com`-brukere i de fire demo-hallene før full-plan-run. Etter DB-reset kaller runneren lokal-only `POST /api/_dev/rehydrate-persistent-state`, som kjører `engine.hydratePersistentState()` slik at `ComplianceManager`-cache matcher DB før kjøp starter.
 **Prevention:**
 - Ved load-test med gjenbrukte syntetiske brukere må RG-ledger resettes eller brukerne roteres.
-- Hvis backend allerede har RG-state cachet i minne, restart backend etter reset.
+- Hvis backend allerede har RG-state cachet i minne, restart backend eller kall lokal-only rehydrate-endpoint etter reset.
 - Ikke øk RG-limits for å få testen grønn uten å dokumentere hvorfor; det skjuler en ekte compliance-guard.
 **Related:**
 - `scripts/dev/goh-full-plan-run.mjs`
+- `apps/backend/src/index.ts` — lokal-only `/api/_dev/rehydrate-persistent-state`
 - `docs/operations/GOH_FULL_PLAN_TEST_RESULT_2026-05-16.md`
 - `docs/evidence/20260516-goh-full-plan-run/`
 
@@ -1785,19 +1824,23 @@ curl -s "http://localhost:4000/api/_dev/debug/round-replay/<scheduled-game-id>?t
 
 **Severity:** P1 (spillerklient/live-markering kan være ute av sync med scheduled-game)
 **Oppdaget:** 2026-05-16 (GoH full-plan runner, clean rerun)
-**Status:** LØST 2026-05-17 (scheduled mark-validator før legacy fallback)
+**Status:** LØST 2026-05-17 rev2 (explicit `scheduledGameId` fra `draw:new.gameId`; rev1 var utilstrekkelig; postfix-rerun verifiserte 39106 mark acks og 0 failures over tre 4x80-runder før separat join-timeout stoppet runde 4)
 **Symptom:** Alle 13 runder fullfører server-side med draws, pattern-eval, tickets og purchases, men socket-klientene får `ticket.mark.failures` med kode `GAME_NOT_RUNNING` og melding `Ingen aktiv runde i rommet.` Runnerens per-runde `Marks` står 0.
-**Root cause:** Generic socket-handler `ticketEvents.ts` kalte `BingoEngine.markNumber()` for alle rom. Scheduled Spill 1 har ikke autoritativ running game i legacy `BingoEngine`; state eies av `Game1DrawEngineService` + DB (`app_game1_scheduled_games`, `app_game1_draws`, `app_game1_ticket_assignments`). Derfor returnerte legacy-engine `GAME_NOT_RUNNING` selv mens scheduled-engine fullførte draw/pattern-eval korrekt.
-**Fix:** `ticket:mark` prøver først `Game1ScheduledTicketMarkService.validate()`. Service bruker in-memory `RoomSnapshot.scheduledGameId` for å identifisere scheduled Spill 1 og validerer mot DB-backed scheduled state: status `running`/`paused`, tallet er trukket, spilleren finnes i rommet, og spillerens assignments inneholder tallet. Kun non-scheduled rom faller tilbake til `BingoEngine.markNumber()`.
+**Root cause:** Generic socket-handler `ticketEvents.ts` kalte først `BingoEngine.markNumber()` for alle rom. Scheduled Spill 1 har ikke autoritativ running game i legacy `BingoEngine`; state eies av `Game1DrawEngineService` + DB (`app_game1_scheduled_games`, `app_game1_draws`, `app_game1_ticket_assignments`). Rev1-fixen la til DB-validator, men brukte fortsatt mutable in-memory `RoomSnapshot.scheduledGameId`. GoH 4x80-rerun 2026-05-17 viste at canonical room reset kan nullstille bindingen før high-frequency mark-acks er ferdig prosessert, slik at handleren falt tilbake til legacy path og ga `GAME_NOT_RUNNING`.
+**Fix:** `ticket:mark` payload aksepterer nå optional `scheduledGameId`. GoH-runner sender `scheduledGameId: draw:new.gameId`, socket-handleren videresender feltet, og `Game1ScheduledTicketMarkService.validate()` bruker eksplisitt game-id som autoritativ DB-key. Service validerer rom-match, aktiv/paused status, drawn number, spiller finnes i rommet, og spillerens assignments inneholder tallet. For eksplisitt scheduled id aksepteres også late ack etter `completed` når tallet faktisk var trukket og på spillerens bong. Kun non-scheduled rom uten explicit scheduled id faller tilbake til `BingoEngine.markNumber()`.
 **Prevention:**
 - Full-plan-runner skal fortsette å logge mark-failures som anomalies selv når runden fullfører.
 - Ikke bruk kun server-side draw completion som bevis for at live-spiller-markering er frisk.
 - Aldri kall `BingoEngine.markNumber()` direkte for scheduled Spill 1.
+- Aldri baser scheduled mark-validering kun på `RoomSnapshot.scheduledGameId`; `draw:new.gameId` må føres videre til `ticket:mark` når det finnes.
 - Aldri hydrer full `enrichScheduledGame1RoomSnapshot()` per `ticket:mark`; GoH 4x80 kan produsere hundretusener av marks og full snapshot per mark blir N+1/load-regresjon.
 - Regresjonstester: `apps/backend/src/game/Game1ScheduledTicketMarkService.test.ts` og `apps/backend/src/sockets/gameEvents/ticketEvents.scheduled.test.ts`.
 **Related:**
 - `docs/evidence/20260516-goh-full-plan-run/goh-full-plan-run-2026-05-16T15-52-08-891Z.json`
+- `docs/evidence/20260517-goh-full-plan-rerun-4x80/goh-full-plan-rerun-4x80-20260517T1002.json`
+- `docs/evidence/20260517-goh-full-plan-rerun-4x80-postfix/goh-full-plan-rerun-4x80-postfix-20260517T1033.json`
 - `docs/operations/GOH_FULL_PLAN_TEST_RESULT_2026-05-16.md`
+- `docs/operations/GOH_FULL_PLAN_4X80_RERUN_RESULT_2026-05-17.md`
 - `scripts/dev/goh-full-plan-run.mjs`
 - `apps/backend/src/game/Game1ScheduledTicketMarkService.ts`
 - `apps/backend/src/sockets/gameEvents/ticketEvents.ts`
@@ -1817,6 +1860,22 @@ curl -s "http://localhost:4000/api/_dev/debug/round-replay/<scheduled-game-id>?t
 - `scripts/dev/goh-full-plan-run.mjs`
 - `docs/evidence/20260516-goh-full-plan-run-4x80/`
 - `docs/operations/GOH_FULL_PLAN_4X80_TEST_RESULT_2026-05-16.md`
+
+### §6.25 — Runner-output med `--output <path>` må ikke overskrive JSON med Markdown
+
+**Severity:** P2 (evidence-kvalitet; kan miste full JSON selv om testen passerer)
+**Oppdaget:** 2026-05-17 (GoH 4x80 final pass etter mark-retry)
+**Symptom:** Runneren passerte 13/13 planposisjoner, men logget `PASSED {"json":"true","markdown":"true"}`. Full JSON ble skrevet til filen `true` og deretter overskrevet av markdown fordi `OUTPUT_MD = OUTPUT_JSON.replace(/\.json$/, ".md")` returnerte samme path når output ikke endte på `.json`.
+**Root cause:** `scripts/dev/goh-full-plan-run.mjs::parseArgs()` støttet bare `--output=<path>`, mens PM kjørte `--output <path>`. Da ble `args.output=true`. I tillegg hadde report-writeren ingen guard mot lik JSON/Markdown-path.
+**Fix:** Runneren støtter nå både `--key=value` og `--key value`, og Markdown-path blir `${OUTPUT_JSON}.md` hvis output ikke ender på `.json`. Final pass sin markdown ble flyttet til canonical evidence-mappe, og en recovered summary JSON dokumenterer nøkkeltallene eksplisitt.
+**Prevention:**
+- CLI-runnere i repoet skal bruke samme `parseArgs`-mønster som `observability-snapshot.mjs`.
+- Report-writers må aldri anta at output ender på `.json`; guard mot at to artefakter skriver samme path.
+- Når evidence er kritisk, verifiser etter run at både `.json` og `.md` finnes før du lukker testoppgaven.
+**Related:**
+- `scripts/dev/goh-full-plan-run.mjs`
+- `docs/evidence/20260517-goh-full-plan-rerun-4x80-markretry/goh-full-plan-rerun-4x80-markretry-20260517T142023.md`
+- `docs/evidence/20260517-goh-full-plan-rerun-4x80-markretry/goh-full-plan-rerun-4x80-markretry-20260517T142023.summary.json`
 
 ---
 
@@ -4303,7 +4362,9 @@ Hver fix-PR auto-deleter sin branch på origin men ikke lokal worktree. Hver gan
 | 2026-05-16 | Lagt til §11.25 — Agent-contract bygd men ikke adoptert i daglig flyt (0/35 high-risk spawns). Fase A av ADR-0024 layered defense: pre-spawn agent-contract-gate (shadow-mode 2026-05-16 → 2026-05-23, hard-fail tidligst 2026-05-24) + bypass-telemetri-script + ukentlig cron. Validerer `Contract-ID:` + `Contract-path:` for high-risk PR-er, eller `[agent-contract-not-applicable:]` bypass. 29 + 26 tester. | PM-AI (Fase A — pre-spawn evidence gate) |
 | 2026-05-17 | Lagt til §11.26 — Worktree+stash baggage akkumulerer (400 worktrees / 178 stashes). Fase B av ADR-0024 follow-up: cleanup-scripts med safety-verdict per item, DRY-RUN BY DEFAULT, `--apply` for interaktiv sletting. Worktree-script identifiserer SAFE/LOCKED-S/ORPHANED/UNSAFE_*/CURRENT/MAIN. Stash-script kategoriserer AUTO-BACKUP/AGENT-LEFTOVER/MERGED-BRANCH/FRESH/EXPLICIT-KEEP/UNCLEAR. Bash 3.2-kompatibel. | PM-AI (Fase B — lokal cleanup-scripts) |
 | 2026-05-16 | Lagt til §4.8 og §6.24 fra GoH 4x80 full-plan test: Sentry N+1 på master advance/resume ble fikset med catalog batch-load, og full-plan runner ble gjort skala-dynamisk for 80 spillere per hall. | PM-AI (GoH 4x80 load-test + observability) |
-| 2026-05-17 | Oppdatert §6.23 fra ÅPEN til LØST: scheduled Spill 1 `ticket:mark` bruker nå DB-backed scheduled validator med cache før legacy `BingoEngine` fallback. Dokumenterer anti-mønsteret "server-side completion ≠ frisk live player socket-flow". | PM-AI (scheduled ticket:mark P1 fix) |
+| 2026-05-17 | Oppdatert §6.23 rev2: 4x80-rerun viste at rev1-fixen fortsatt falt tilbake til legacy når `RoomSnapshot.scheduledGameId` ble nullstilt etter canonical room reset. Endelig kontrakt: `draw:new.gameId` må sendes som `ticket:mark.scheduledGameId`, og validatoren bruker eksplisitt DB-key + rom-match + late completed-ack. | PM-AI (scheduled ticket:mark P1 fix rerun) |
 | 2026-05-16 | Lagt til §9.10 — Render External Database URL er full-access, ikke read-only. Opprettet `spillorama_pm_readonly` og koblet observability-runner til `postgres-readonly.env`. | PM-AI (DB observability read-only role) |
 | 2026-05-16 | Lagt til §7.38 — BuyPopup-design må separere test-låst DOM-kontrakt fra visuell mockup. Header én linje, `Du kjøper` nederst i ticket-wrapper, no-scroll-verifisering i visual-harness. Total 117→118 entries. | PM-AI (BuyPopup design parity) |
 | 2026-05-16 | Lagt til §7.39 — Ticket-grid top-gap må måles fra faktisk top-HUD, ikke hardkodes. `PlayScreen` plasserer nå bongene `16px` under målt `top-group-wrapper`-bunn og reposerer etter status/endring. Total 118→119 entries. | PM-AI (Spill 1 bong vertical spacing) |
+| 2026-05-17 | Lagt til §4.9 — `game1:join-scheduled` ack-timeout under 4x80 plan-advance må håndteres som transient/idempotent retry, ikke final produkt-state-failure. Runner og `Game1Controller` fikk retry. Total 186→187 entries. | PM-AI (GoH 4x80 postfix-rerun) |
+| 2026-05-17 | Lagt til §2.12, oppdatert §4.9/§6.22 og lagt til §6.25 etter final GoH 4x80 pass: wallet circuit-open bevares som transient kode, RG-cache rehydrerer etter DB-reset, scheduled join retry er verifisert 13/13, og runner-output støtter `--output <path>` uten å overskrive JSON. | PM-AI/Codex (GoH 4x80 final pass) |

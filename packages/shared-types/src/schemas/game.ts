@@ -524,6 +524,13 @@ export const TicketMarkPayloadSchema = z.object({
   playerId: z.string().optional(),
   number: z.number().int().positive().max(75),
   /**
+   * Scheduled Spill 1 authority hint. `draw:new` already carries `gameId`;
+   * clients/runners should echo it here so backend validation can target the
+   * immutable scheduled-game row instead of relying on mutable room state.
+   * Optional for legacy/ad-hoc BingoEngine rooms.
+   */
+  scheduledGameId: z.string().min(1).optional(),
+  /**
    * BIN-813 R5: Klient-generert UUID v4 for idempotent socket-event-
    * dedupe. Reconnect-replay av `ticket:mark` med samme `clientRequestId`
    * gir cached respons uten dupliserte engine-marks. Optional for

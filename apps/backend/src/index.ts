@@ -5212,6 +5212,40 @@ app.post("/api/_dev/reset-test-user", async (req, res) => {
   }
 });
 
+/**
+ * Local-dev only: reload engine-owned persistent state after scripts mutate
+ * local test DB state directly. `scripts/dev/goh-full-plan-run.mjs` resets
+ * synthetic demo-load responsible-gaming rows in Postgres; without this
+ * rehydrate call, ComplianceManager can keep stale in-memory loss-limit rows
+ * from earlier aborted local runs and produce false `LOSS_LIMIT_EXCEEDED`.
+ */
+app.post("/api/_dev/rehydrate-persistent-state", async (req, res) => {
+  const isLocalhost =
+    req.ip === "127.0.0.1" ||
+    req.ip === "::1" ||
+    req.ip === "::ffff:127.0.0.1";
+  if (isProduction || !isLocalhost) {
+    res.status(403).json({
+      ok: false,
+      error: { code: "FORBIDDEN", message: "Dev-only endpoint" },
+    });
+    return;
+  }
+
+  try {
+    await engine.hydratePersistentState();
+    apiSuccess(res, { rehydrated: true, at: new Date().toISOString() });
+  } catch (err) {
+    res.status(500).json({
+      ok: false,
+      error: {
+        code: "REHYDRATE_FAILED",
+        message: err instanceof Error ? err.message : String(err),
+      },
+    });
+  }
+});
+
 // Tobias 2026-05-04: Spill 2 (rocket) debug-telemetry-route. Token-gated.
 // Mountes på samme nivå som /api/_dev/reset-test-user. To endepunkter:
 //   GET  /api/_dev/game2-state?token=...     — full diagnose
