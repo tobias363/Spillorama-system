@@ -59,6 +59,31 @@ Hver entry har struktur:
 
 ## Entries (newest first)
 
+### 2026-05-17 — PM-AI: Fase B.3 — cleanup-merged-worktrees.sh squash-merge-aware (~10 GB disk-cleanup)
+
+**Branch:** `claude/fase-b3-agent-worktree-cleanup-2026-05-17`
+**Agent type:** PM-AI (selv, ikke spawnet ekstern agent)
+**Trigger:** Etter Fase B + B.2 var 35 GB i `.claude/worktrees/agent-*` (385 worktrees) fortsatt klassifisert LOCKED-UNSAFE. Samme rotårsak som Fase B.2: squash-merge bryter `git merge-base --is-ancestor`.
+
+**Outputs:**
+1. `scripts/cleanup-merged-worktrees.sh` utvidet: forhåndslast `gh pr list --state merged` cache, ny `branch_is_squash_merged()` helper, fall-back i `classify_worktree()` etter is-ancestor feiler.
+2. `docs/engineering/PITFALLS_LOG.md` §11.26 utvidet (Fix/Prevention/Related) — INGEN ny §, samme pitfall.
+3. `.claude/skills/pm-orchestration-pattern/SKILL.md` v1.8.0 → v1.10.0 (v1.9.0 reservert av Fase B.2 PR #1565).
+4. `docs/engineering/AGENT_EXECUTION_LOG.md` denne entry.
+
+**Empirisk DRY-RUN 2026-05-17:** 5 LOCKED-S → **116 LOCKED-S** (+111 reklassifisert fra LOCKED-UNSAFE). Eligible totalt med `--include-locked`: 8 SAFE + 116 LOCKED-S + 240 ORPHANED prune = 364 worktrees. Forventet disk-frigjort ~10 GB.
+
+**Læring:** Konsoliderbar `lib/squash-merge-cache.sh` med `load_cache()` + `is_squash_merged(branch)` — brukes nå i 2 cleanup-scripts. Spores som follow-up.
+
+**PR:** under-konstruksjon
+
+**Shared files touched:**
+- `scripts/cleanup-merged-worktrees.sh`, `docs/engineering/PITFALLS_LOG.md`, `.claude/skills/pm-orchestration-pattern/SKILL.md`, `docs/engineering/AGENT_EXECUTION_LOG.md`
+
+**Coordination note:** Ingen Codex-PR rører samme filer. Pending PR #1561 (fix-up) rører ikke samme region. Pending PR #1565 (Fase B.2) bruker SKILL v1.9.0 + PITFALLS §11.27 — denne PR bruker v1.10.0 + utvider §11.26 (ingen §-konflikt).
+
+---
+
 ### 2026-05-15 — PM/audit-agent: Access-/approval-matrise før required reviews
 
 **Branch:** `codex/access-approval-matrix`
