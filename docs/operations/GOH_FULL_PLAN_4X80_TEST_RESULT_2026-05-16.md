@@ -1,6 +1,6 @@
 # GoH Full-Plan 4x80 Test Result — 2026-05-16
 
-**Status:** PASSED with P1 follow-up  
+**Status:** PASSED; follow-up fixes merged, re-run required
 **Utført av:** PM-AI / Codex  
 **Miljø:** Lokal backend på `http://localhost:4000`, lokal Postgres/Redis, Sentry/PostHog API snapshots, pilot-monitor  
 **Scope:** `demo-pilot-goh`, 4 testhaller x 80 spillere = 320 samtidige testspillere  
@@ -13,7 +13,14 @@ Full spilleplan ble kjørt ende-til-ende med 320 syntetiske spillere fordelt på
 
 Kjernen er positiv: alle 13 plan-spill fullførte, 320/320 spillere koblet til, 4160 kjøp gikk gjennom, og pilot-monitor hadde 0 P0/P1 i testvinduet.
 
-Dette er likevel ikke "ferdig robust" fordi live socket-markering fortsatt feiler: `ticket:mark` ga `GAME_NOT_RUNNING` gjennom hele kjøringen, med 0 `markAcks`. Server-side draw/pattern-eval fullfører, men spillerklientens mark-path er fortsatt en P1.
+Dette var likevel ikke "ferdig robust" på testtidspunktet fordi live socket-markering feilet: `ticket:mark` ga `GAME_NOT_RUNNING` gjennom hele kjøringen, med 0 `markAcks`. Server-side draw/pattern-eval fullførte, men spillerklientens mark-path var P1.
+
+**Fix-status 2026-05-17:** Begge konkrete issues fra denne 4x80-runden er nå fikset og merget:
+
+- Sentry N+1 på `master/advance` og `master/resume` ble fikset med batch-load av catalog entries i PR #1562.
+- Scheduled Spill 1 `ticket:mark` `GAME_NOT_RUNNING` ble fikset med DB-backed scheduled validator før legacy `BingoEngine` fallback i PR #1563.
+
+Dette betyr ikke at systemet er ferdig sertifisert som robust. Det betyr at alle kjente blokkere fra denne kjøringen har landed fixes. Neste beviskrav er ny 4x80-kjøring med observability snapshots der `ticket:mark failures = 0`, `markAcks > 0`, og ingen nye P0/P1 dukker opp i Sentry/PostHog/pilot-monitor.
 
 ## Nøkkeltall
 
@@ -82,11 +89,11 @@ Alle planposisjoner fullførte med 320 samtidige syntetiske spillere. Kjøp, rea
 
 `scripts/dev/goh-full-plan-run.mjs` hadde hardkodet `4 * 50 = 200` ticket assignments per runde. For 80 spillere per hall er riktig forventning 230 assignments per hall og 920 per runde. Runneren beregner nå forventningen fra faktisk `clients[]`.
 
-### 3. `ticket:mark` er fortsatt P1
+### 3. `ticket:mark` var P1 under testen — fixed etterpå i PR #1563
 
 Alle runder fullfører server-side, men socket-eventen `ticket:mark` feiler med `GAME_NOT_RUNNING`. Dette er samme bug-klasse som 4x20 baseline, nå bekreftet ved 4x80.
 
-Sannsynlig retning: `ticket:mark` bruker fortsatt legacy `BingoEngine.markNumber({ roomCode, playerId, number })`-path, mens scheduled Spill 1 rundestate eies av `Game1DrawEngineService` og DB. Neste fix må wire scheduled Spill 1 markering mot riktig scheduled-game/status-kilde og ha regresjonstest.
+Root cause ble bekreftet: `ticket:mark` brukte legacy `BingoEngine.markNumber({ roomCode, playerId, number })`-path, mens scheduled Spill 1 rundestate eies av `Game1DrawEngineService` og DB. PR #1563 wirer scheduled Spill 1-markering mot riktig scheduled-game/status-kilde og har regresjonstester.
 
 ### 4. N+1 i master advance/resume ble fanget av Sentry
 
@@ -126,8 +133,8 @@ node scripts/dev/observability-snapshot.mjs \
 
 ## Neste PM Skal Gjøre
 
-1. Fix scheduled Spill 1 `ticket:mark` path først. Det er nå den tydeligste P1 etter 4x80.
-2. Re-kjør 4x80 etter `ticket:mark`-fix og krev `markAcks > 0` og `GAME_NOT_RUNNING = 0`.
-3. Følg Sentry for `SPILLORAMA-BACKEND-A` og `SPILLORAMA-BACKEND-8` etter batch-fixen. Nye events etter fix betyr at flere catalog lookups ligger igjen.
-4. Avklar auto-resume-kontrakten med Tobias før pilot: er 4 phase-pauses per runde ønsket produktatferd eller test-runner-overstyring?
-5. Behold Sentry/PostHog/DB snapshots som obligatorisk før/midt/etter ved alle større GoH-load-kjøringer.
+1. Re-kjør 4x80 etter PR #1562 og #1563 og krev `markAcks > 0`, `ticket:mark failures = 0`, og `GAME_NOT_RUNNING = 0`.
+2. Følg Sentry for `SPILLORAMA-BACKEND-A` og `SPILLORAMA-BACKEND-8` etter batch-fixen. Nye events etter fix betyr at flere catalog lookups ligger igjen.
+3. Avklar auto-resume-kontrakten med Tobias før pilot: er 4 phase-pauses per runde ønsket produktatferd eller test-runner-overstyring?
+4. Behold Sentry/PostHog/DB snapshots som obligatorisk før/midt/etter ved alle større GoH-load-kjøringer.
+5. Hvis ny 4x80 er grønn, løft neste nivå: høyere varighet, flere samtidige spillere, nettverksavbrudd/reconnect og wallet-/payout-reconciliation etter full plan.

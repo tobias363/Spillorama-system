@@ -1,6 +1,6 @@
 # AI Branch Coordination Protocol — Codex + Claude
 
-**Status:** Autoritativ fra 2026-05-16.
+**Status:** Autoritativ fra 2026-05-16. Oppdatert 2026-05-17 med mandatory fresh-main sync.
 **Formål:** Hindre at Codex- og Claude-sesjoner skaper git-konflikter, kunnskapsdrift eller dobbeltdokumentasjon når begge jobber i samme repo.
 **Gjelder:** Alle PM-er, Codex-sesjoner, Claude-sesjoner og agenter som skriver til `Spillorama-system`.
 
@@ -16,6 +16,8 @@ Codex og Claude kan jobbe parallelt, men de skal jobbe i adskilte spor:
 | Claude | `claude/<scope>-YYYY-MM-DD` | PM-struktur, kunnskapsflyt, playbooks, skills, handoff, governance, agent-kontrakter |
 
 Begge kan lese alt. Bare én skal skrive til samme lock-fil om gangen.
+
+**Fresh-main invariant:** Ingen Codex- eller Claude-session skal starte kodearbeid, fortsette på en gammel branch, eller røre lock-listen uten først å kjøre `git fetch origin` og rebase/merge mot fersk `origin/main`. Dette gjelder også når den andre AI-en nettopp har merget en PR.
 
 ---
 
@@ -57,10 +59,34 @@ Før første filendring i en ny Codex- eller Claude-session:
 
 ```bash
 cd /Users/tobiashaugen/Projects/Spillorama-system
-git fetch origin main
+git fetch origin main --prune
 git status -sb
 gh pr list --state open --json number,title,headRefName,isDraft,mergeStateStatus
 ```
+
+Hvis du starter ny branch fra main-worktree:
+
+```bash
+git switch main
+git pull --ff-only origin main
+git switch -c codex/<scope>-YYYY-MM-DD   # eller claude/<scope>-YYYY-MM-DD
+```
+
+Hvis du allerede står på en feature-branch eller i egen worktree:
+
+```bash
+git fetch origin main --prune
+git status -sb
+git rebase origin/main
+```
+
+Hvis branchen allerede er pushet, push kun etter vellykket rebase med:
+
+```bash
+git push --force-with-lease
+```
+
+`git merge origin/main` er kun akseptabelt hvis branchen er delt mellom flere aktører og SHA-rewrite vil skjule andres arbeid. Da må PR-body forklare hvorfor merge ble valgt i stedet for rebase.
 
 PM/session-agent skal deretter skrive i sin interne plan eller første status:
 
@@ -68,6 +94,7 @@ PM/session-agent skal deretter skrive i sin interne plan eller første status:
 Branch lane: codex|claude
 Planned branch: <branch>
 Base: origin/main@<short-sha>
+Fresh-main sync: fetched + rebased|merged|created-from-origin-main
 Shared-file intent: none | <fil-liste>
 Open PRs checked: yes
 Rebase needed before shared files: yes|no
@@ -82,6 +109,7 @@ Hvis `Shared-file intent` overlapper med en åpen PR fra det andre sporet, stopp
 Alle PR-er som rører lock-listen skal ha disse linjene i PR-body:
 
 ```markdown
+Fresh-main sync: fetched origin/main and rebased|merged at <short-sha>
 Shared-file rebase: origin/main@<short-sha>
 Shared files touched:
 - <path>
@@ -143,14 +171,19 @@ Du jobber i Spillorama-system parallelt med Codex. Følg docs/operations/AI_BRAN
 Din branch-lane er claude/<scope>-YYYY-MM-DD. Codex bruker codex/<scope>-YYYY-MM-DD. Start alltid med:
 
 cd /Users/tobiashaugen/Projects/Spillorama-system
-git fetch origin main
+git fetch origin main --prune
 git status -sb
 gh pr list --state open --json number,title,headRefName,isDraft,mergeStateStatus
+
+Hvis du allerede er på en claude-branch, kjør før filendring:
+
+git rebase origin/main
 
 Før du endrer filer, rapporter:
 - Branch lane
 - Planned branch
 - Base origin/main@<short-sha>
+- Fresh-main sync: fetched + rebased|created-from-origin-main
 - Shared-file intent
 - Om du må rebase før lock-files
 
@@ -166,6 +199,7 @@ IKKE endre disse samtidig som Codex uten eksplisitt avklaring og rebase:
 Hvis du må endre en av disse: sjekk åpne PR-er først. Hvis Codex allerede har en PR som rører samme fil, vent til den er merget eller rebase på origin/main etter den. For PITFALLS_LOG og AGENT_EXECUTION_LOG skal du kun gjøre append-only endringer og renummerere egne nye entries etter rebase.
 
 Alle PR-er som rører lock-listen skal ha i PR-body:
+Fresh-main sync: fetched origin/main and rebased|merged at <short-sha>
 Shared-file rebase: origin/main@<short-sha>
 Shared files touched:
 - <path>
@@ -189,11 +223,15 @@ Du jobber i Spillorama-system parallelt med Claude. Følg docs/operations/AI_BRA
 Din branch-lane er codex/<scope>-YYYY-MM-DD. Claude bruker claude/<scope>-YYYY-MM-DD. Start alltid med:
 
 cd /Users/tobiashaugen/Projects/Spillorama-system
-git fetch origin main
+git fetch origin main --prune
 git status -sb
 gh pr list --state open --json number,title,headRefName,isDraft,mergeStateStatus
 
-Før du endrer filer, rapporter branch lane, planned branch, base origin/main@<short-sha>, shared-file intent, og om rebase trengs.
+Hvis du allerede er på en codex-branch, kjør før filendring:
+
+git rebase origin/main
+
+Før du endrer filer, rapporter branch lane, planned branch, base origin/main@<short-sha>, fresh-main sync, shared-file intent, og om rebase trengs.
 
 Ikke endre lock-listen samtidig som Claude:
 - docs/engineering/PITFALLS_LOG.md
@@ -225,6 +263,7 @@ Hvis runtime-fiksen krever skill/PITFALLS/AGENT_EXECUTION_LOG, gjør det i samme
 | Ikke gjør dette | Gjør dette |
 |---|---|
 | Codex og Claude endrer `PITFALLS_LOG.md` samtidig | Én eier, andre rebases etter merge |
+| Fortsette på branch etter at den andre AI-en har merget | `git fetch origin main --prune` + `git rebase origin/main` før ny filendring |
 | "Bare en liten workflow-endring" i begge branches | Én workflow-owner om gangen |
 | Renummerere PITFALLS før rebase | Rebase først, renummerer egne nye entries etterpå |
 | Merge docs-branch uten å sjekke runtime-PR | `gh pr list` først |
@@ -248,3 +287,4 @@ Hvis runtime-fiksen krever skill/PITFALLS/AGENT_EXECUTION_LOG, gjør det i samme
 | Dato | Endring |
 |---|---|
 | 2026-05-16 | Initial — etablert etter Codex/Claude parallellarbeid og konflikt-risiko rundt knowledge logs, workflows og package-filer. |
+| 2026-05-17 | La til mandatory fresh-main sync: alle Codex/Claude-branches skal `git fetch origin` + rebase/merge mot `origin/main` før første filendring og etter at den andre AI-en har merget. PR-body må dokumentere sync for lock-list PR-er. |
