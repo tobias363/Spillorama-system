@@ -4,8 +4,8 @@
 > `.github/workflows/auto-generate-docs.yml` på hver push til main.
 >
 > Generator: `scripts/generate-architecture-docs.sh`
-> Sist oppdatert: 2026-05-15T21:21:10Z
-> Commit: `b772ccfd` (branch: `main`)
+> Sist oppdatert: 2026-05-17T17:48:12Z
+> Commit: `a40d4d2e` (branch: `main`)
 
 Oversikt over alle apps og pakker i monorepoet. `apps/` = deploy-bare
 enheter (egne package.json + build), `packages/` = delt kode importert
@@ -18,9 +18,9 @@ av apps via workspace-symlinks.
 
 | App | Path | Har package.json | Har src/ | Linjer kode (.ts/.tsx) |
 |---|---|:---:|:---:|---:|
-| `admin-web` | `apps/admin-web` | ✓ | ✓ | 113482 |
+| `admin-web` | `apps/admin-web` | ✓ | ✓ | 113500 |
 | `android` | `apps/android` | – | – | 0 |
-| `backend` | `apps/backend` | ✓ | ✓ | 9101 |
+| `backend` | `apps/backend` | ✓ | ✓ | 10779 |
 | `ios` | `apps/ios` | – | – | 0 |
 | `windows` | `apps/windows` | – | – | 0 |
 
@@ -28,8 +28,8 @@ av apps via workspace-symlinks.
 
 | Pakke | Path | Har package.json | Linjer kode (.ts/.tsx) |
 |---|---|:---:|---:|
-| `game-client` | `packages/game-client` | ✓ | 74001 |
-| `shared-types` | `packages/shared-types` | ✓ | 7579 |
+| `game-client` | `packages/game-client` | ✓ | 76017 |
+| `shared-types` | `packages/shared-types` | ✓ | 7606 |
 
 ## Backend-domene-kataloger (apps/backend/src/)
 
@@ -45,7 +45,7 @@ Hver mappe representerer en bounded context.
 | `compliance` | 53 |
 | `draw-engine` | 10 |
 | `errors` | 2 |
-| `game` | 317 |
+| `game` | 319 |
 | `integration` | 28 |
 | `jobs` | 33 |
 | `media` | 2 |
@@ -59,7 +59,7 @@ Hver mappe representerer en bounded context.
 | `scripts` | 6 |
 | `security` | 5 |
 | `services` | 16 |
-| `sockets` | 74 |
+| `sockets` | 75 |
 | `spillevett` | 11 |
 | `store` | 7 |
 | `util` | 62 |
