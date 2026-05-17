@@ -50,6 +50,25 @@ cat <<HEADER
 > pågående refaktor-bølger, sist merger til main, åpne pilot-blokkere, aktive
 > worktrees og hvilke skills som finnes for domenet.
 
+## Obligatorisk preflight før filendring
+
+Codex:
+
+\`\`\`bash
+cd /Users/tobiashaugen/Projects/Spillorama-system-codex
+npm run agent:preflight -- --actor codex
+\`\`\`
+
+Claude:
+
+\`\`\`bash
+cd /Users/tobiashaugen/Projects/Spillorama-system-claude
+npm run agent:preflight -- --actor claude
+\`\`\`
+
+Ikke endre filer før scriptet skriver \`PREFLIGHT PASS\`.
+Les også \`docs/operations/CODEX_CLAUDE_WORKTREE_ROUTINE.md\`.
+
 HEADER
 
 # ─── Pågående refaktor-bølger ─────────────────────────────────────────────────

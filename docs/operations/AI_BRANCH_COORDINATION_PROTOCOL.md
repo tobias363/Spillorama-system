@@ -58,12 +58,21 @@ Hvis begge må endre samme lock-fil, gjelder denne rekkefølgen:
 
 Før første filendring i en ny Codex- eller Claude-session:
 
+Codex:
+
 ```bash
-cd /Users/tobiashaugen/Projects/Spillorama-system
-git fetch origin main --prune
-git status -sb
-gh pr list --state open --json number,title,headRefName,isDraft,mergeStateStatus
+cd /Users/tobiashaugen/Projects/Spillorama-system-codex
+npm run agent:preflight -- --actor codex
 ```
+
+Claude:
+
+```bash
+cd /Users/tobiashaugen/Projects/Spillorama-system-claude
+npm run agent:preflight -- --actor claude
+```
+
+Ikke rediger filer før scriptet skriver `PREFLIGHT PASS`.
 
 Hvis du starter ny branch fra main-worktree:
 
@@ -171,14 +180,10 @@ Du jobber i Spillorama-system parallelt med Codex. Følg docs/operations/AI_BRAN
 
 Din branch-lane er claude/<scope>-YYYY-MM-DD. Codex bruker codex/<scope>-YYYY-MM-DD. Start alltid med:
 
-cd /Users/tobiashaugen/Projects/Spillorama-system
-git fetch origin main --prune
-git status -sb
-gh pr list --state open --json number,title,headRefName,isDraft,mergeStateStatus
+cd /Users/tobiashaugen/Projects/Spillorama-system-claude
+npm run agent:preflight -- --actor claude
 
-Hvis du allerede er på en claude-branch, kjør før filendring:
-
-git rebase origin/main
+Ikke endre filer før scriptet skriver PREFLIGHT PASS.
 
 Før du endrer filer, rapporter:
 - Branch lane
@@ -223,14 +228,10 @@ Du jobber i Spillorama-system parallelt med Claude. Følg docs/operations/AI_BRA
 
 Din branch-lane er codex/<scope>-YYYY-MM-DD. Claude bruker claude/<scope>-YYYY-MM-DD. Start alltid med:
 
-cd /Users/tobiashaugen/Projects/Spillorama-system
-git fetch origin main --prune
-git status -sb
-gh pr list --state open --json number,title,headRefName,isDraft,mergeStateStatus
+cd /Users/tobiashaugen/Projects/Spillorama-system-codex
+npm run agent:preflight -- --actor codex
 
-Hvis du allerede er på en codex-branch, kjør før filendring:
-
-git rebase origin/main
+Ikke endre filer før scriptet skriver PREFLIGHT PASS.
 
 Før du endrer filer, rapporter branch lane, planned branch, base origin/main@<short-sha>, fresh-main sync, shared-file intent, og om rebase trengs.
 
